@@ -1,0 +1,31 @@
+# sbt specific
+target/
+project/target/
+project/project/
+
+# IDE
+.idea/
+.bsp/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Test scripts
+test-api.sh
+
+# Docker
+Dockerfile
+.dockerignore
+gizmo.Dockerfile
+
