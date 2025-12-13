@@ -21,3 +21,5 @@ object EnvVars:
   /** Default script to execute when starting a process (default: /opt/gizmo/scripts/start_gizmosql.sh) */
   val defaultScript: String = sys.env.getOrElse("SL_GIZMO_DEFAULT_SCRIPT", "/opt/gizmo/scripts/start_gizmosql.sh")
 
+  /** API key required for authentication (no default - must be set) */
+  val apiKey: Option[String] = sys.env.get("SL_GIZMO_API_KEY")

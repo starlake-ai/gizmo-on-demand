@@ -62,6 +62,7 @@ ENV SL_GIZMO_MIN_PORT=11900
 ENV SL_GIZMO_MAX_PORT=12000
 ENV SL_GIZMO_MAX_PROCESSES=10
 ENV SL_GIZMO_DEFAULT_SCRIPT=/opt/gizmo/scripts/start_gizmosql.sh
+# SL_GIZMO_API_KEY should be set at runtime for security
 
 # Expose the process manager port
 EXPOSE 10900

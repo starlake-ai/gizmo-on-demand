@@ -10,52 +10,54 @@ object ProcessEndpoints:
 
   // Base endpoint with common error handling
   private val baseEndpoint = endpoint
+    .in("api" / "process")
+    .in(header[Option[String]]("X-API-Key").description("API key for authentication"))
     .errorOut(jsonBody[ErrorResponse])
 
   /** Endpoint to start a process */
-  val startProcess: PublicEndpoint[StartProcessRequest, ErrorResponse, StartProcessResponse, Any] =
+  val startProcess: PublicEndpoint[(Option[String], StartProcessRequest), ErrorResponse, StartProcessResponse, Any] =
     baseEndpoint
       .post
-      .in("api" / "process" / "start")
+      .in("start")
       .in(jsonBody[StartProcessRequest])
       .out(jsonBody[StartProcessResponse])
       .name("Start Process")
       .description("Start a new process with the given name")
 
   /** Endpoint to stop a process */
-  val stopProcess: PublicEndpoint[StopProcessRequest, ErrorResponse, StopProcessResponse, Any] =
+  val stopProcess: PublicEndpoint[(Option[String], StopProcessRequest), ErrorResponse, StopProcessResponse, Any] =
     baseEndpoint
       .post
-      .in("api" / "process" / "stop")
+      .in("stop")
       .in(jsonBody[StopProcessRequest])
       .out(jsonBody[StopProcessResponse])
       .name("Stop Process")
       .description("Stop a running process")
 
   /** Endpoint to restart a process */
-  val restartProcess: PublicEndpoint[RestartProcessRequest, ErrorResponse, RestartProcessResponse, Any] =
+  val restartProcess: PublicEndpoint[(Option[String], RestartProcessRequest), ErrorResponse, RestartProcessResponse, Any] =
     baseEndpoint
       .post
-      .in("api" / "process" / "restart")
+      .in("restart")
       .in(jsonBody[RestartProcessRequest])
       .out(jsonBody[RestartProcessResponse])
       .name("Restart Process")
       .description("Restart a running process")
 
   /** Endpoint to list all processes */
-  val listProcesses: PublicEndpoint[Unit, ErrorResponse, ListProcessesResponse, Any] =
+  val listProcesses: PublicEndpoint[Option[String], ErrorResponse, ListProcessesResponse, Any] =
     baseEndpoint
       .get
-      .in("api" / "process" / "list")
+      .in("list")
       .out(jsonBody[ListProcessesResponse])
       .name("List Processes")
       .description("List all running processes")
 
   /** Endpoint to stop all processes */
-  val stopAll: PublicEndpoint[Unit, ErrorResponse, StopProcessResponse, Any] =
+  val stopAll: PublicEndpoint[Option[String], ErrorResponse, StopProcessResponse, Any] =
     baseEndpoint
       .post
-      .in("api" / "process" / "stopAll")
+      .in("stopAll")
       .out(jsonBody[StopProcessResponse])
       .name("Stop All Processes")
       .description("Stop all running processes")

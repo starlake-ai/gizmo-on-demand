@@ -46,6 +46,7 @@ The server can be configured using environment variables:
 - **SL_GIZMO_MAX_PORT**: Maximum port number for managed processes (default: `9000`)
 - **SL_GIZMO_MAX_PROCESSES**: Maximum number of processes that can be spawned (default: `10`)
 - **SL_GIZMO_DEFAULT_SCRIPT**: Path to the script to execute when starting processes (default: `/opt/gizmo/scripts/start_gizmosql.sh`)
+- **SL_GIZMO_API_KEY**: API key required for authentication (no default - if not set, authentication is disabled)
 
 Example:
 ```bash
@@ -60,6 +61,25 @@ SL_GIZMO_MIN_PORT=10000 SL_GIZMO_MAX_PORT=11000 sbt run
 
 # Limit the number of processes
 SL_GIZMO_MAX_PROCESSES=5 sbt run
+```
+
+### Authentication
+
+The API supports optional API key authentication via the `X-API-Key` header:
+
+- **Enabled**: Set the `SL_GIZMO_API_KEY` environment variable to your desired API key
+- **Disabled**: Leave `SL_GIZMO_API_KEY` unset (authentication will be bypassed)
+
+When authentication is enabled, all API requests must include the `X-API-Key` header with the correct API key. Requests without a valid API key will receive a `401 Unauthorized` response.
+
+Example with authentication:
+```bash
+# Set the API key when starting the server
+SL_GIZMO_API_KEY=my-secret-key sbt run
+
+# Include the API key in requests
+curl http://localhost:10900/api/process/list \
+  -H "X-API-Key: my-secret-key"
 ```
 
 ### API Documentation
@@ -197,17 +217,20 @@ Response:
 ## Example Usage with curl
 
 ```bash
-# Start a process with required environment variables
+# Start a process with required environment variables (with API key)
 curl -X POST http://localhost:10900/api/process/start \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: your-secret-api-key" \
   -d '{"processName": "my-app", "arguments": {"GIZMOSQL_USERNAME": "admin", "GIZMOSQL_PASSWORD": "secret123", "SL_PROJECT_ID": "project-001", "SL_DATA_PATH": "/data/starlake", "PG_USERNAME": "postgres", "PG_PASSWORD": "pgpass", "PG_PORT": "5432", "PG_HOST": "localhost"}}'
 
 # List all processes
-curl http://localhost:10900/api/process/list
+curl http://localhost:10900/api/process/list \
+  -H "X-API-Key: your-secret-api-key"
 
 # Stop a process
 curl -X POST http://localhost:10900/api/process/stop \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: your-secret-api-key" \
   -d '{"processName": "my-app"}'
 
 # Restart a process (preserves original arguments)
