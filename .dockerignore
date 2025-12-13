@@ -27,5 +27,4 @@ test-api.sh
 # Docker
 Dockerfile
 .dockerignore
-gizmo.Dockerfile
 
