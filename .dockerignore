@@ -27,4 +27,9 @@ test-api.sh
 # Docker
 Dockerfile
 .dockerignore
+gizmo.Dockerfile
 
+# Publishing
+publish-docker.sh
+version.txt
+.github/

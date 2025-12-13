@@ -53,7 +53,7 @@ USER app_user
 WORKDIR ${GIZMO_MANAGER_DIR}
 
 # Copy the built JAR from builder stage
-COPY --from=builder --chown=app_user:app_user /build/target/scala-3.7.4/gizmo-on-demand-assembly-0.1.0-SNAPSHOT.jar ./gizmo-manager.jar
+COPY --from=builder --chown=app_user:app_user /build/target/scala-3.7.4/gizmo-on-demand-assembly-0.1.0-SNAPSHOT.jar ./gizmo-on-demand.jar
 
 # Environment variables with defaults
 ENV SL_GIZMO_HOST=0.0.0.0
@@ -71,5 +71,5 @@ EXPOSE 10900
 EXPOSE 11900-12000
 
 # Start the process manager
-ENTRYPOINT ["java", "-jar", "gizmo-manager.jar"]
+ENTRYPOINT ["java", "-jar", "gizmo-on-demand.jar"]
 
