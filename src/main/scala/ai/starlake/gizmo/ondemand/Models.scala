@@ -29,3 +29,6 @@ case class ListProcessesResponse(processes: List[ProcessInfo])
 /** Error response */
 case class ErrorResponse(error: String)
 
+/** Health check response */
+case class HealthResponse(status: String, message: String)
+

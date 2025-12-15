@@ -8,6 +8,15 @@ import sttp.tapir.json.circe.* // Automatic Circe encoder/decoder derivation
 /** Tapir endpoint definitions for process management */
 object ProcessEndpoints:
 
+  /** Health check endpoint (no authentication required) */
+  val health: PublicEndpoint[Unit, Unit, HealthResponse, Any] =
+    endpoint
+      .get
+      .in("health")
+      .out(jsonBody[HealthResponse])
+      .name("Health Check")
+      .description("Health check endpoint")
+
   // Base endpoint with common error handling
   private val baseEndpoint = endpoint
     .in("api" / "process")

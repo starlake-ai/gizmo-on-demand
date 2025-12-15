@@ -42,8 +42,23 @@ object ProxyServer extends IOApp with LazyLogging:
       // Generate INIT_SQL_COMMANDS logic
       initSqlCommands <- IO:
         val env = sys.env
+
+        // Build S3 secret SQL if AWS credentials are provided
+        val s3SecretSql = (env.get("AWS_KEY_ID"), env.get("AWS_SECRET"), env.get("AWS_REGION")) match
+          case (Some(keyId), Some(secret), Some(region)) =>
+            val scopePart = env.get("AWS_SCOPE").map(scope => s", SCOPE '$scope'").getOrElse("")
+            s"""CREATE OR REPLACE PERSISTENT SECRET s3_{{SL_PROJECT_ID}}
+               |   (TYPE s3, KEY_ID '$keyId', SECRET '$secret', REGION '$region'$scopePart);""".stripMargin
+          case _ => ""
+
         val initSqlTemplate =
-          """CREATE OR REPLACE PERSISTENT SECRET pg_{{SL_PROJECT_ID}} (TYPE postgres, HOST '{{PG_HOST}}',PORT {{PG_PORT}}, DATABASE {{SL_PROJECT_ID}}, USER '{{PG_USERNAME}}',PASSWORD '{{PG_PASSWORD}}');CREATE OR REPLACE PERSISTENT SECRET {{SL_PROJECT_ID}} (TYPE ducklake, METADATA_PATH '',DATA_PATH '{{SL_DATA_PATH}}', METADATA_PARAMETERS MAP {'TYPE': 'postgres', 'SECRET': 'pg_{{SL_PROJECT_ID}}'});ATTACH IF NOT EXISTS 'ducklake:{{SL_PROJECT_ID}}' AS {{SL_PROJECT_ID}} (READ_ONLY); USE {{SL_PROJECT_ID}};"""
+          s"""CREATE OR REPLACE PERSISTENT SECRET pg_{{SL_PROJECT_ID}}
+            |   (TYPE postgres, HOST '{{PG_HOST}}',PORT {{PG_PORT}}, DATABASE {{SL_PROJECT_ID}}, USER '{{PG_USERNAME}}',PASSWORD '{{PG_PASSWORD}}');
+            |$s3SecretSql
+            |CREATE OR REPLACE PERSISTENT SECRET {{SL_PROJECT_ID}}
+            |   (TYPE ducklake, METADATA_PATH '',DATA_PATH '{{SL_DATA_PATH}}', METADATA_PARAMETERS MAP {'TYPE': 'postgres', 'SECRET': 'pg_{{SL_PROJECT_ID}}'});
+            |ATTACH IF NOT EXISTS 'ducklake:{{SL_PROJECT_ID}}' AS {{SL_PROJECT_ID}} (READ_ONLY);
+            |USE {{SL_PROJECT_ID}};""".stripMargin
 
         initSqlTemplate
           .replace("{{SL_PROJECT_ID}}", env.getOrElse("SL_PROJECT_ID", ""))

@@ -19,6 +19,8 @@ GIZMOSQL_PASSWORD="${GIZMOSQL_PASSWORD:-gizmosql_password}"
 JWT_SECRET_KEY="${JWT_SECRET_KEY:-a_very_secret_key}"
 
 # Build the JSON payload
+# In addition to the variables below, the user may use AWS_KEY, AWS_SECRET AWS_REGION and AWS_SCOPE
+# This is useful if ducklake files are store in a S3 filesystem
 JSON_PAYLOAD=$(cat <<EOF
 {
     "processName": "$PROCESS_NAME",

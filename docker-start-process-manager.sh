@@ -51,10 +51,19 @@ if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
     docker rm "$CONTAINER_NAME" 2>/dev/null || true
 fi
 
+# add here a variable that contains multiple absolute folders
+# that will be used each to build the volume mounts required
+# These are required when running ducklake stores files locally
+SL_GIZMO_DATA_PATHS="${SL_GIZMO_DATA_PATHS:-$HOME/git/starlake-api/starlake-api-samples}"
+
+for path in $SL_GIZMO_DATA_PATHS; do
+    VOLUMES="$VOLUMES -v $path:$path"
+done
+
 # Run the container
 docker run --rm \
     --name "$CONTAINER_NAME" \
-    --volume /Users/hayssams/git/starlake-api/starlake-api-samples:/Users/hayssams/git/starlake-api/starlake-api-samples \
+    $VOLUMES \
     -p "${HOST_PORT}:${SL_GIZMO_ON_DEMAND_PORT}" \
     -p "${SL_GIZMO_MIN_PORT}-${SL_GIZMO_MAX_PORT}:${SL_GIZMO_MIN_PORT}-${SL_GIZMO_MAX_PORT}" \
     -e SL_GIZMO_ON_DEMAND_HOST="$SL_GIZMO_ON_DEMAND_HOST" \

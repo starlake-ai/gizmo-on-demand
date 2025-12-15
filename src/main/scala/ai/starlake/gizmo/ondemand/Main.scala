@@ -80,10 +80,16 @@ object Main extends LazyLogging:
         case Right(_)    => Right(processManager.stopAll)
     }
 
+    // Health endpoint (no authentication required)
+    val healthEndpoint = ProcessEndpoints.health.handle { _ =>
+      Right(HealthResponse(status = "ok", message = "Gizmo On-Demand Process Manager is running"))
+    }
+
     // Create and start the JDK HTTP server with Tapir
     val server = JdkHttpServer()
       .port(EnvVars.port)
       .host(EnvVars.host)
+      .addEndpoint(healthEndpoint)
       .addEndpoint(startProcessEndpoint)
       .addEndpoint(stopProcessEndpoint)
       .addEndpoint(restartProcessEndpoint)
@@ -93,6 +99,7 @@ object Main extends LazyLogging:
 
     logger.info(s"Server started at http://${EnvVars.host}:${EnvVars.port}")
     logger.info("API endpoints:")
+    logger.info("  GET  /health")
     logger.info("  POST /api/process/start")
     logger.info("  POST /api/process/stop")
     logger.info("  POST /api/process/restart")
