@@ -21,8 +21,8 @@ help:
 	@echo "    docker-push-release  - Publish release to Docker Hub"
 	@echo ""
 	@echo "  Environment Variables:"
-	@echo "    SL_GIZMO_API_KEY     - API key for authentication"
-	@echo "    SL_GIZMO_PORT        - Server port (default: 10900)"
+	@echo "    SL_GIZMO_API_KEY     	- API key for authentication"
+	@echo "    SL_GIZMO_ON_DEMAND_PORT  - Server port (default: 10900)"
 	@echo ""
 
 # Development targets
