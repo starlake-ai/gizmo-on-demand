@@ -28,7 +28,8 @@ COPY src src
 RUN sbt assembly
 
 # Runtime stage - build on top of gizmodata/gizmosql from Docker Hub
-FROM gizmodata/gizmosql:latest
+ARG GIZMO_VERSION=v1.13.4
+FROM gizmodata/gizmosql:${GIZMO_VERSION}
 
 # Switch to root to install additional packages
 USER root
@@ -47,17 +48,25 @@ ARG GIZMO_MANAGER_DIR=/opt/gizmo/manager
 RUN mkdir -p ${GIZMO_MANAGER_DIR} && \
     chown app_user:app_user ${GIZMO_MANAGER_DIR}
 
+ARG GIZMO_SCRIPTS_DIR=/opt/gizmo/scripts
+RUN mkdir -p ${GIZMO_SCRIPTS_DIR} && \
+    chown app_user:app_user ${GIZMO_SCRIPTS_DIR}
+
 # Switch back to app_user
 USER app_user
 
 WORKDIR ${GIZMO_MANAGER_DIR}
 
 # Copy the built JAR from builder stage
-COPY --from=builder --chown=app_user:app_user /build/target/scala-3.7.4/gizmo-on-demand-assembly-0.1.0-SNAPSHOT.jar ./gizmo-on-demand.jar
+COPY --from=builder --chown=app_user:app_user /build/distrib/gizmo-on-demand-assembly-0.1.0-SNAPSHOT.jar ./gizmo-on-demand.jar
+
+# Copy proxy startup script
+COPY --chown=app_user:app_user start-proxy.sh ${GIZMO_SCRIPTS_DIR}/start-proxy.sh
+RUN chmod +x ${GIZMO_SCRIPTS_DIR}/start-proxy.sh
 
 # Environment variables with defaults
-ENV SL_GIZMO_HOST=0.0.0.0
-ENV SL_GIZMO_PORT=10900
+ENV SL_GIZMO_ON_DEMAND_HOST=0.0.0.0
+ENV SL_GIZMO_ON_DEMAND_PORT=10900
 ENV SL_GIZMO_MIN_PORT=11900
 ENV SL_GIZMO_MAX_PORT=12000
 ENV SL_GIZMO_MAX_PROCESSES=10

@@ -1,4 +1,4 @@
-package ai.starlake.gizmo
+package ai.starlake.gizmo.ondemand
 
 import io.circe.generic.auto.* // Automatic derivation - no need for manual given instances
 

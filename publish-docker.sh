@@ -61,6 +61,11 @@ fi
 # Bootstrap the builder
 docker buildx inspect --bootstrap
 
+# GizmoSQL Base Image Version
+GIZMO_VERSION="${GIZMO_VERSION:-v1.13.4}"
+print_info "Using GizmoSQL base version: ${GIZMO_VERSION}"
+
+
 # Get version from file or use default
 if [ -f "$VERSION_FILE" ]; then
     BASE_VERSION=$(cat "$VERSION_FILE" | tr -d '[:space:]')
@@ -102,6 +107,7 @@ print_info "Tags: ${TAGS[*]}"
 
 docker buildx build \
     --platform linux/amd64,linux/arm64 \
+    --build-arg GIZMO_VERSION="${GIZMO_VERSION}" \
     ${TAG_ARGS} \
     --push \
     .

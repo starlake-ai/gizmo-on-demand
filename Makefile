@@ -27,7 +27,7 @@ help:
 
 # Development targets
 build:
-	sbt compile
+	sbt assembly
 
 run:
 	sbt run
