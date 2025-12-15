@@ -42,7 +42,7 @@ clean:
 
 # Docker targets
 docker-build:
-	docker build -t gizmo-on-demand:local .
+	docker build -t starlakeai/gizmo-on-demand:latest .
 
 docker-run:
 	docker run -d \

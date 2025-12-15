@@ -38,28 +38,28 @@ java --add-opens=java.base/java.nio=ALL-UNNAMED -jar distrib/gizmo-on-demand-ass
 ### Process Manager configuration
 These variables control the main management service:
 
-| Environment Variable      | Default | Description |
-|---------------------------|---------|-------------|
-| `SL_GIZMO_ON_DEMAND_HOST` | `0.0.0.0` | Host to bind the management API |
-| `SL_GIZMO_ON_DEMAND_PORT`           | `10900` | Port for the management API |
-| `SL_GIZMO_MIN_PORT`       | `8000` | Start of port range for spawned processes |
-| `SL_GIZMO_MAX_PORT`       | `9000` | End of port range for spawned processes |
-| `SL_GIZMO_MAX_PROCESSES`  | `10` | Maximum number of concurrent proxy instances |
-| `SL_GIZMO_DEFAULT_SCRIPT` | `/opt/gizmo/scripts/start_gizmosql.sh` | Script to start the backend GizmoSQL process |
-| `SL_GIZMO_API_KEY`        | - | **Required**. API Key for authentication |
+| Environment Variable      | Default                                   | Description |
+|---------------------------|-------------------------------------------|-------------|
+| `SL_GIZMO_ON_DEMAND_HOST` | `0.0.0.0`                                 | Host to bind the management API |
+| `SL_GIZMO_ON_DEMAND_PORT` | `10900`                                   | Port for the management API |
+| `SL_GIZMO_MIN_PORT`       | `11900`                                   | Start of port range for spawned processes |
+| `SL_GIZMO_MAX_PORT`       | `12000`                                   | End of port range for spawned processes |
+| `SL_GIZMO_MAX_PROCESSES`  | `10`                                      | Maximum number of concurrent proxy instances |
+| `SL_GIZMO_DEFAULT_SCRIPT` | `/opt/gizmosql/scripts/docker-start-sl-gizmosql.sh` | Script to start the backend GizmoSQL process |
+| `SL_GIZMO_API_KEY`        | -                                         | **Required**. API Key for authentication |
 
 ### Proxy Configuration
 These variables are used by the spawned proxy instances (usually set automatically by ProcessManager):
 
 | Environment Variable | Description |
-|---------------------|-------------|
-| `PROXY_HOST` | Host for the proxy to listen on (default 0.0.0.0) |
-| `PROXY_PORT` | Port for the proxy to listen on |
-| `GIZMOSQL_HOST` | Host of the backend GizmoSQL (default 127.0.0.1) |
-| `GIZMOSQL_PORT` | Port of the backend GizmoSQL |
-| `PROXY_SECRET_KEY` | Secret key for JWT generation |
+|----------------------|-------------|
+| `PROXY_HOST`         | Host for the proxy to listen on (default 0.0.0.0) |
+| `PROXY_PORT`         | Port for the proxy to listen on |
+| `GIZMO_SERVER_HOST`  | Host of the backend GizmoSQL (default 127.0.0.1) |
+| `GIZMO_SERVER_PORT`  | Port of the backend GizmoSQL |
+| `PROXY_SECRET_KEY`   | Secret key for JWT generation |
 
-### TLS Configuration
+### TLS Configurationîî
 
 | Environment Variable | Description |
 |---------------------|-------------|

@@ -26,21 +26,38 @@ class FlightSqlProxy(
     config: GizmoSqlProxyConfig,
     validator: StatementValidator,
     allocator: RootAllocator
-) extends NoOpFlightSqlProducer, LazyLogging:
+) extends NoOpFlightSqlProducer,
+      LazyLogging:
 
   val backendClients = new ConcurrentHashMap[String, FlightClient]()
   val handshakeCredentials = new ConcurrentHashMap[String, String]()
-  val handshakeAuthHandler = new FlightSqlProxy.HandshakeAuthHandler(config, allocator, backendClients, handshakeCredentials)
-  val middlewareFactory = new FlightSqlProxy.AuthMiddlewareFactory(config, allocator, backendClients, handshakeCredentials)
+  val handshakeAuthHandler = new FlightSqlProxy.HandshakeAuthHandler(
+    config,
+    allocator,
+    backendClients,
+    handshakeCredentials
+  )
+  val middlewareFactory = new FlightSqlProxy.AuthMiddlewareFactory(
+    config,
+    allocator,
+    backendClients,
+    handshakeCredentials
+  )
 
-  private def getBackendClient(context: FlightProducer.CallContext): FlightClient =
+  private def getBackendClient(
+      context: FlightProducer.CallContext
+  ): FlightClient =
     val username = FlightSqlProxy.currentUsername.get()
-    val clientKey = if username != null && username.nonEmpty then username
-                    else Option(context.peerIdentity()).filter(_.nonEmpty).getOrElse("anonymous")
+    val clientKey =
+      if username != null && username.nonEmpty then username
+      else
+        Option(context.peerIdentity()).filter(_.nonEmpty).getOrElse("anonymous")
 
     Option(backendClients.get(clientKey)).getOrElse {
       throw CallStatus.UNAUTHENTICATED
-        .withDescription(s"No authenticated backend client found for user: $clientKey")
+        .withDescription(
+          s"No authenticated backend client found for user: $clientKey"
+        )
         .toRuntimeException()
     }
 
@@ -65,7 +82,10 @@ class FlightSqlProxy(
       listener: FlightProducer.StreamListener[FlightInfo]
   ): Unit =
     try
-      getBackendClient(context).listFlights(criteria).asScala.foreach(listener.onNext)
+      getBackendClient(context)
+        .listFlights(criteria)
+        .asScala
+        .foreach(listener.onNext)
       listener.onCompleted()
     catch
       case e: Exception =>
@@ -82,23 +102,36 @@ class FlightSqlProxy(
         val commandStr = new String(command, 0, Math.min(100, command.length))
 
         // Flight SQL metadata commands - forward without validation
-        if commandStr.contains("CommandGetTables") || commandStr.contains("CommandGetCatalogs") ||
-           commandStr.contains("CommandGetSchemas") || commandStr.contains("CommandGetSqlInfo") then
-          return getBackendClient(context).getInfo(descriptor)
+        if commandStr.contains("CommandGetTables") || commandStr.contains(
+            "CommandGetCatalogs"
+          ) ||
+          commandStr.contains("CommandGetSchemas") || commandStr.contains(
+            "CommandGetSqlInfo"
+          )
+        then return getBackendClient(context).getInfo(descriptor)
 
         // SQL statements - validate if enabled
         val fullCommandStr = new String(command)
         val normalizedStatement = stripCommentsAndWhitespace(fullCommandStr)
 
-        if normalizedStatement.matches("(?i)^(WITH|SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|TRUNCATE|EXPLAIN|DESCRIBE|SHOW|SET|USE|GRANT|REVOKE|MERGE|COPY).*") then
-          validator.validate(ValidationContext(
-            username = extractUsername(context),
-            database = "default",
-            statement = fullCommandStr,
-            peer = context.peerIdentity()
-          )).unsafeRunSync() match
+        if normalizedStatement.matches(
+            "(?i)^(WITH|SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|TRUNCATE|EXPLAIN|DESCRIBE|SHOW|SET|USE|GRANT|REVOKE|MERGE|COPY).*"
+          )
+        then
+          validator
+            .validate(
+              ValidationContext(
+                username = extractUsername(context),
+                database = "default",
+                statement = fullCommandStr,
+                peer = context.peerIdentity()
+              )
+            )
+            .unsafeRunSync() match
             case Denied(reason) =>
-              throw CallStatus.UNAUTHENTICATED.withDescription(s"Statement execution denied: $reason").toRuntimeException()
+              throw CallStatus.UNAUTHENTICATED
+                .withDescription(s"Statement execution denied: $reason")
+                .toRuntimeException()
             case Allowed => // Continue
 
       getBackendClient(context).getInfo(descriptor)
@@ -116,9 +149,12 @@ class FlightSqlProxy(
     new Runnable:
       override def run(): Unit =
         try
-          val putStream = client.startPut(flightStream.getDescriptor, flightStream.getRoot,
+          val putStream = client.startPut(
+            flightStream.getDescriptor,
+            flightStream.getRoot,
             new AsyncPutListener:
-              override def onNext(putResult: PutResult): Unit = ackStream.onNext(putResult)
+              override def onNext(putResult: PutResult): Unit =
+                ackStream.onNext(putResult)
           )
           while flightStream.next() do putStream.putNext()
           putStream.completed()
@@ -146,7 +182,10 @@ class FlightSqlProxy(
       listener: FlightProducer.StreamListener[Result]
   ): Unit =
     try
-      getBackendClient(context).doAction(action).asScala.foreach(listener.onNext)
+      getBackendClient(context)
+        .doAction(action)
+        .asScala
+        .foreach(listener.onNext)
       listener.onCompleted()
     catch
       case e: Exception =>
@@ -179,27 +218,40 @@ object FlightSqlProxy:
       authHeader: String,
       logger: com.typesafe.scalalogging.Logger
   ): FlightClient =
-    val backendLocation = if config.backend.tls.enabled then Location.forGrpcTls(config.backend.host, config.backend.port)
-                          else Location.forGrpcInsecure(config.backend.host, config.backend.port)
+    val backendLocation =
+      if config.backend.tls.enabled then
+        Location.forGrpcTls(config.backend.host, config.backend.port)
+      else Location.forGrpcInsecure(config.backend.host, config.backend.port)
 
-    FlightClient.builder(allocator, backendLocation)
-      .intercept(new FlightClientMiddleware.Factory:
-        override def onCallStarted(info: CallInfo): FlightClientMiddleware =
-          new FlightClientMiddleware:
-            override def onBeforeSendingHeaders(outgoingHeaders: CallHeaders): Unit =
-              outgoingHeaders.insert("authorization", authHeader)
-            override def onHeadersReceived(incomingHeaders: CallHeaders): Unit = ()
-            override def onCallCompleted(status: CallStatus): Unit = ()
-      ).build()
+    FlightClient
+      .builder(allocator, backendLocation)
+      .intercept(
+        new FlightClientMiddleware.Factory:
+          override def onCallStarted(info: CallInfo): FlightClientMiddleware =
+            new FlightClientMiddleware:
+              override def onBeforeSendingHeaders(
+                  outgoingHeaders: CallHeaders
+              ): Unit =
+                outgoingHeaders.insert("authorization", authHeader)
+              override def onHeadersReceived(
+                  incomingHeaders: CallHeaders
+              ): Unit = ()
+              override def onCallCompleted(status: CallStatus): Unit = ()
+      )
+      .build()
 
   class HandshakeAuthHandler(
       config: GizmoSqlProxyConfig,
       allocator: RootAllocator,
       backendClients: ConcurrentHashMap[String, FlightClient],
       handshakeCredentials: ConcurrentHashMap[String, String]
-  ) extends ServerAuthHandler with LazyLogging:
+  ) extends ServerAuthHandler
+      with LazyLogging:
 
-    override def authenticate(outgoing: ServerAuthHandler.ServerAuthSender, incoming: java.util.Iterator[Array[Byte]]): Boolean =
+    override def authenticate(
+        outgoing: ServerAuthHandler.ServerAuthSender,
+        incoming: java.util.Iterator[Array[Byte]]
+    ): Boolean =
       if !incoming.hasNext || incoming.next().isEmpty then
         outgoing.send(Array.emptyByteArray)
         return true
@@ -207,7 +259,8 @@ object FlightSqlProxy:
       val handshakeRequest = new String(incoming.next(), StandardCharsets.UTF_8)
       try
         val parts = handshakeRequest.split("\u0000")
-        if parts.length < 2 then throw new IllegalArgumentException("Invalid handshake format")
+        if parts.length < 2 then
+          throw new IllegalArgumentException("Invalid handshake format")
 
         var username = parts(0)
         var password = parts(1)
@@ -219,36 +272,61 @@ object FlightSqlProxy:
           password = username.substring(pos + delimiter.length)
           username = username.substring(0, pos)
 
-        val authHeader = s"Basic ${java.util.Base64.getEncoder.encodeToString(s"$username:$password".getBytes(StandardCharsets.UTF_8))}"
+        val authHeader =
+          s"Basic ${java.util.Base64.getEncoder.encodeToString(s"$username:$password".getBytes(StandardCharsets.UTF_8))}"
 
-        backendClients.put(username, createBackendClientWithAuth(config, allocator, username, authHeader, logger))
+        backendClients.put(
+          username,
+          createBackendClientWithAuth(
+            config,
+            allocator,
+            username,
+            authHeader,
+            logger
+          )
+        )
         handshakeCredentials.put(username, authHeader)
         outgoing.send(username.getBytes(StandardCharsets.UTF_8))
         true
       catch
         case e: Exception =>
-          throw CallStatus.UNAUTHENTICATED.withDescription(s"Handshake authentication failed: ${e.getMessage}").withCause(e).toRuntimeException()
+          throw CallStatus.UNAUTHENTICATED
+            .withDescription(
+              s"Handshake authentication failed: ${e.getMessage}"
+            )
+            .withCause(e)
+            .toRuntimeException()
 
     override def isValid(token: Array[Byte]): java.util.Optional[String] =
       if token == null || token.isEmpty then
-        if !handshakeCredentials.isEmpty then java.util.Optional.of(handshakeCredentials.keys().asScala.toSeq.head)
+        if !handshakeCredentials.isEmpty then
+          java.util.Optional.of(handshakeCredentials.keys().asScala.toSeq.head)
         else java.util.Optional.empty()
       else
         val username = new String(token, StandardCharsets.UTF_8)
-        if handshakeCredentials.containsKey(username) then java.util.Optional.of(username)
+        if handshakeCredentials.containsKey(username) then
+          java.util.Optional.of(username)
         else java.util.Optional.empty()
 
-  class AuthMiddleware(username: String, secretKey: String) extends FlightServerMiddleware with LazyLogging:
+  class AuthMiddleware(username: String, jwtSecretKey: String)
+      extends FlightServerMiddleware
+      with LazyLogging:
     override def onBeforeSendingHeaders(outgoingHeaders: CallHeaders): Unit =
-      outgoingHeaders.insert("authorization", s"Bearer ${AuthMiddleware.createJWTToken(username, secretKey)}")
+      outgoingHeaders.insert(
+        "authorization",
+        s"Bearer ${AuthMiddleware.createJWTToken(username, jwtSecretKey)}"
+      )
 
-    override def onCallCompleted(status: CallStatus): Unit = FlightSqlProxy.currentUsername.remove()
-    override def onCallErrored(err: Throwable): Unit = FlightSqlProxy.currentUsername.remove()
+    override def onCallCompleted(status: CallStatus): Unit =
+      FlightSqlProxy.currentUsername.remove()
+    override def onCallErrored(err: Throwable): Unit =
+      FlightSqlProxy.currentUsername.remove()
 
   object AuthMiddleware:
-    def createJWTToken(username: String, secretKey: String): String =
+    def createJWTToken(username: String, jwtSecretKey: String): String =
       val now = Instant.now()
-      JWT.create()
+      JWT
+        .create()
         .withIssuer("gizmosql")
         .withJWTId(s"gizmosql-server-${UUID.randomUUID()}")
         .withIssuedAt(Date.from(now))
@@ -257,23 +335,32 @@ object FlightSqlProxy:
         .withClaim("role", "admin")
         .withClaim("auth_method", "Basic")
         .withClaim("session_id", UUID.randomUUID().toString)
-        .sign(Algorithm.HMAC256(secretKey))
+        .sign(Algorithm.HMAC256(jwtSecretKey))
 
   class AuthMiddlewareFactory(
       config: GizmoSqlProxyConfig,
       allocator: RootAllocator,
       backendClients: ConcurrentHashMap[String, FlightClient],
       handshakeCredentials: ConcurrentHashMap[String, String]
-  ) extends FlightServerMiddleware.Factory[AuthMiddleware] with LazyLogging:
+  ) extends FlightServerMiddleware.Factory[AuthMiddleware]
+      with LazyLogging:
 
-    override def onCallStarted(info: CallInfo, incomingHeaders: CallHeaders, context: RequestContext): AuthMiddleware =
+    override def onCallStarted(
+        info: CallInfo,
+        incomingHeaders: CallHeaders,
+        context: RequestContext
+    ): AuthMiddleware =
       val authHeader = Option(incomingHeaders.get("authorization")).getOrElse {
-        throw CallStatus.UNAUTHENTICATED.withDescription("No Authorization header found!").toRuntimeException()
+        throw CallStatus.UNAUTHENTICATED
+          .withDescription("No Authorization header found!")
+          .toRuntimeException()
       }
 
       try
         if authHeader.startsWith("Basic ") then
-          var Array(username, password) = new String(java.util.Base64.getDecoder.decode(authHeader.substring(6))).split(":", 2)
+          var Array(username, password) = new String(
+            java.util.Base64.getDecoder.decode(authHeader.substring(6))
+          ).split(":", 2)
 
           // Handle ODBC driver format: username};PWD={password (mimicking C++ GizmoSQL server)
           if username.contains("};PWD={") then
@@ -282,27 +369,52 @@ object FlightSqlProxy:
             password = username.substring(pos + delimiter.length)
             username = username.substring(0, pos)
 
-          val jwtToken = AuthMiddleware.createJWTToken(username, config.proxy.secretKey)
+          val jwtToken =
+            AuthMiddleware.createJWTToken(username, config.session.jwtSecretKey)
           val bearerAuthHeader = s"Bearer $jwtToken"
 
-          backendClients.put(username, createBackendClientWithAuth(config, allocator, username, bearerAuthHeader, logger))
+          backendClients.put(
+            username,
+            createBackendClientWithAuth(
+              config,
+              allocator,
+              username,
+              bearerAuthHeader,
+              logger
+            )
+          )
           FlightSqlProxy.currentUsername.set(username)
-          new AuthMiddleware(username, config.proxy.secretKey)
-
+          new AuthMiddleware(username, config.session.jwtSecretKey)
         else if authHeader.startsWith("Bearer ") then
-          val decodedJWT = JWT.require(Algorithm.HMAC256(config.proxy.secretKey))
-            .withIssuer("gizmosql").build().verify(authHeader.substring(7))
+          val decodedJWT = JWT
+            .require(Algorithm.HMAC256(config.session.jwtSecretKey))
+            .withIssuer("gizmosql")
+            .build()
+            .verify(authHeader.substring(7))
           val username = decodedJWT.getClaim("sub").asString()
 
           if !backendClients.containsKey(username) then
-            backendClients.put(username, createBackendClientWithAuth(config, allocator, username, authHeader, logger))
+            backendClients.put(
+              username,
+              createBackendClientWithAuth(
+                config,
+                allocator,
+                username,
+                authHeader,
+                logger
+              )
+            )
 
           FlightSqlProxy.currentUsername.set(username)
-          new AuthMiddleware(username, config.proxy.secretKey)
-
+          new AuthMiddleware(username, config.session.jwtSecretKey)
         else
-          throw CallStatus.UNAUTHENTICATED.withDescription("Invalid Authorization Header type!").toRuntimeException()
+          throw CallStatus.UNAUTHENTICATED
+            .withDescription("Invalid Authorization Header type!")
+            .toRuntimeException()
       catch
         case e: FlightRuntimeException => throw e
-        case e: Exception =>
-          throw CallStatus.UNAUTHENTICATED.withDescription(s"Authentication failed: ${e.getMessage}").withCause(e).toRuntimeException()
+        case e: Exception              =>
+          throw CallStatus.UNAUTHENTICATED
+            .withDescription(s"Authentication failed: ${e.getMessage}")
+            .withCause(e)
+            .toRuntimeException()

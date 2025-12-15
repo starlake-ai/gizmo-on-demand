@@ -12,7 +12,6 @@ import org.apache.arrow.memory.RootAllocator
 import java.io.File
 
 object ProxyServer extends IOApp with LazyLogging:
-
   override def run(args: List[String]): IO[ExitCode] =
     // Parse environment variable for Gizmo server port
     val gizmoServerPort =

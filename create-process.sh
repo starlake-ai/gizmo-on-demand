@@ -1,0 +1,56 @@
+#!/bin/bash
+
+# Configuration
+PROCESS_MANAGER_URL="${PROCESS_MANAGER_URL:-http://localhost:31339}"
+API_KEY="${SL_GIZMO_API_KEY:-a_secret_api_key}"
+PROCESS_NAME="${1:-my-gizmo-session}"
+
+# Database connection settings
+SL_PROJECT_ID="${SL_PROJECT_ID:-tpch2}"
+PG_HOST="${PG_HOST:-host.docker.internal}"
+PG_PORT="${PG_PORT:-5432}"
+PG_USERNAME="${PG_USERNAME:-postgres}"
+PG_PASSWORD="${PG_PASSWORD:-azizam}"
+SL_DATA_PATH="${SL_DATA_PATH:-/Users/hayssams/git/starlake-api/starlake-api-samples/100/177/ducklake_files/tpch2}"
+
+# GizmoSQL credentials
+GIZMOSQL_USERNAME="${GIZMOSQL_USERNAME:-gizmosql_username}"
+GIZMOSQL_PASSWORD="${GIZMOSQL_PASSWORD:-gizmosql_password}"
+JWT_SECRET_KEY="${JWT_SECRET_KEY:-a_very_secret_key}"
+
+# Build the JSON payload
+JSON_PAYLOAD=$(cat <<EOF
+{
+    "processName": "$PROCESS_NAME",
+    "arguments": {
+        "SL_PROJECT_ID": "$SL_PROJECT_ID",
+        "PG_HOST": "$PG_HOST",
+        "PG_PORT": "$PG_PORT",
+        "PG_USERNAME": "$PG_USERNAME",
+        "PG_PASSWORD": "$PG_PASSWORD",
+        "SL_DATA_PATH": "$SL_DATA_PATH",
+        "GIZMOSQL_USERNAME": "$GIZMOSQL_USERNAME",
+        "GIZMOSQL_PASSWORD": "$GIZMOSQL_PASSWORD",
+        "GIZMOSQL_LOG_LEVEL": "debug",
+        "DATABASE_FILENAME": ":memory:",
+        "JWT_SECRET_KEY": "$JWT_SECRET_KEY"
+    }
+}
+EOF
+)
+
+# Build the curl command
+if [ -n "$API_KEY" ]; then
+    # With API key authentication
+    curl -X POST "$PROCESS_MANAGER_URL/api/process/start" \
+        -H "Content-Type: application/json" \
+        -H "X-API-Key: $API_KEY" \
+        -d "$JSON_PAYLOAD"
+else
+    # Without API key authentication
+    curl -X POST "$PROCESS_MANAGER_URL/api/process/start" \
+        -H "Content-Type: application/json" \
+        -d "$JSON_PAYLOAD"
+fi
+
+echo ""

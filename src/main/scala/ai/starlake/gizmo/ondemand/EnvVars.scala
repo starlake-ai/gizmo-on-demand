@@ -1,39 +1,35 @@
 package ai.starlake.gizmo.ondemand
 
-/** Centralized configuration from environment variables */
+import ai.starlake.gizmo.ondemand.config.GizmoOnDemandConfig
+import pureconfig.ConfigSource
+
+/** Centralized configuration from application.conf via PureConfig */
 object EnvVars:
 
-  /** Host address to bind the server to (default: 0.0.0.0) */
-  val host: String = sys.env.getOrElse("SL_GIZMO_HOST", "0.0.0.0")
+  private val config: GizmoOnDemandConfig = ConfigSource.default
+    .at("gizmo-on-demand")
+    .loadOrThrow[GizmoOnDemandConfig]
 
-  /** Port number for the server to listen on (default: 10900) */
-  val port: Int = sys.env.getOrElse("SL_GIZMO_PORT", "10900").toInt
+  /** Host address to bind the server to */
+  val host: String = config.host
 
-  /** Minimum port number for managed processes (default: 8000) */
-  val minPort: Int = sys.env.getOrElse("SL_GIZMO_MIN_PORT", "8000").toInt
+  /** Port number for the server to listen on */
+  val port: Int = config.port
 
-  /** Maximum port number for managed processes (default: 9000) */
-  val maxPort: Int = sys.env.getOrElse("SL_GIZMO_MAX_PORT", "9000").toInt
+  /** Minimum port number for managed processes */
+  val minPort: Int = config.minPort
 
-  /** Maximum number of processes that can be spawned (default: 10) */
-  val maxProcesses: Int =
-    sys.env.getOrElse("SL_GIZMO_MAX_PROCESSES", "10").toInt
+  /** Maximum port number for managed processes */
+  val maxPort: Int = config.maxPort
 
-  /** Default script to execute when starting a process (default:
-    * /opt/gizmo/scripts/start_gizmosql.sh)
-    */
-  val defaultGizmoScript: String = sys.env.getOrElse(
-    "SL_GIZMO_DEFAULT_SCRIPT",
-    "/opt/gizmo/scripts/start_gizmosql.sh"
-  )
+  /** Maximum number of processes that can be spawned */
+  val maxProcesses: Int = config.maxProcesses
 
-  /** Script to execute when starting a proxy server (default:
-    * /opt/gizmo/scripts/start-proxy.sh)
-    */
-  val proxyScript: String = sys.env.getOrElse(
-    "SL_GIZMO_PROXY_SCRIPT",
-    "/opt/gizmo/scripts/start-proxy.sh"
-  )
+  /** Default script to execute when starting a process */
+  val defaultGizmoScript: String = config.defaultGizmoScript
 
-  /** API key required for authentication (no default - must be set) */
-  val apiKey: Option[String] = sys.env.get("SL_GIZMO_API_KEY")
+  /** Script to execute when starting a proxy server */
+  val proxyScript: String = config.proxyScript
+
+  /** API key required for authentication */
+  val apiKey: Option[String] = config.apiKey

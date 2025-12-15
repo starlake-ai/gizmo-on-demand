@@ -121,6 +121,7 @@ class ProcessManager extends LazyLogging:
               ).asJava
 
               val processBuilder = new ProcessBuilder(jobCommand)
+              
               val env = processBuilder.environment()
 
               // Pass original arguments to environment
@@ -132,7 +133,7 @@ class ProcessManager extends LazyLogging:
               env.put("PROXY_HOST", "0.0.0.0")
 
               // Backend is local to the proxy process
-              // Set Gizmo Server Port for the proxy to start it
+              // Set Gizmo Server Port for the proxy to start and connect to
               env.put("GIZMO_SERVER_HOST", "127.0.0.1")
               env.put("GIZMO_SERVER_PORT", backendPort.toString)
 
@@ -189,9 +190,7 @@ class ProcessManager extends LazyLogging:
                   arguments
                 )
 
-              Option(
-                processes.putIfAbsent(processName, managedProcess)
-              ) match
+              processes.putIfAbsent(processName, managedProcess) match
                 case Some(_) =>
                   // Race condition: process was started by someone else
                   process.destroy()
@@ -225,7 +224,9 @@ class ProcessManager extends LazyLogging:
         Left(s"Process '$processName' is not running")
       case Some(managedProcess) =>
         logger.info(s"Stopping process '$processName'")
-        managedProcess.process.destroy()
+        // Kill processes by port (more reliable than stored PID)
+        killProcessOnPort(managedProcess.port)
+        killProcessOnPort(managedProcess.backendPort)
         processes.remove(processName)
         usedPorts.remove(managedProcess.port)
         usedPorts.remove(managedProcess.backendPort)
@@ -272,7 +273,6 @@ class ProcessManager extends LazyLogging:
     ListProcessesResponse(processInfos)
 
   /** Find and kill process using a specific port */
-
   private def killProcessOnPort(port: Int): Boolean =
     try
       // Try to find process using lsof command (works on Unix-like systems)
@@ -300,7 +300,9 @@ class ProcessManager extends LazyLogging:
     logger.info(s"Stopping all tracked processes ($trackedCount total)")
     processes.values.foreach { managedProcess =>
       logger.info(s"Stopping process '${managedProcess.name}'")
-      managedProcess.process.destroy()
+      // Kill processes by port
+      killProcessOnPort(managedProcess.port)
+      killProcessOnPort(managedProcess.backendPort)
       totalStopped += 1
     }
     processes.clear()

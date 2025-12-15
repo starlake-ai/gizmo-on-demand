@@ -11,7 +11,6 @@ case class ProxyTlsConfig(
 case class ProxyServerConfig(
     host: String,
     port: Int,
-    secretKey: String,
     tls: ProxyTlsConfig
 ) derives ConfigReader
 
@@ -45,11 +44,24 @@ case class LoggingConfig(
     logValidation: Boolean
 ) derives ConfigReader
 
+case class SessionConfig(
+    gizmosqlUsername: String,
+    gizmosqlPassword: String,
+    slProjectId: String,
+    slDataPath: String,
+    pgUsername: String,
+    pgPassword: String,
+    pgPort: Int,
+    pgHost: String,
+    jwtSecretKey: String
+) derives ConfigReader
+
 case class GizmoSqlProxyConfig(
     proxy: ProxyServerConfig,
     backend: BackendConfig,
     validation: ValidationConfig,
-    logging: LoggingConfig
+    logging: LoggingConfig,
+    session: SessionConfig
 ) derives ConfigReader
 
 object ProxyConfig:

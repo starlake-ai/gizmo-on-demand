@@ -1,5 +1,6 @@
 package ai.starlake.gizmo.proxy.gizmoserver
 
+import ai.starlake.gizmo.proxy.ProxyServer
 import cats.effect.{IO, Resource}
 import com.typesafe.scalalogging.LazyLogging
 
@@ -23,15 +24,27 @@ class GizmoServerManager(
 
     val command = Seq(EnvVars.defaultGizmoScript).asJava
     val processBuilder = new java.lang.ProcessBuilder(command)
+
     val env = processBuilder.environment()
 
     // Explicitly forward provided environment variables
-    envVars.foreach { case (k, v) => env.put(k, v) }
+    envVars.foreach { case (k, v) =>
+      logger.debug(s"Setting env var: $k=$v")
+      env.put(k, v)
+    }
 
+    // Set both PORT and GIZMO_SERVER_PORT for the backend script
     env.put("PORT", port.toString)
+    env.put("GIZMO_SERVER_PORT", port.toString)
+    logger.info(s"Set PORT and GIZMO_SERVER_PORT to $port")
 
     logger.info(s"Injecting INIT_SQL_COMMANDS into backend environment")
     env.put("INIT_SQL_COMMANDS", initSqlCommands)
+
+    // Log key variables for debugging
+    logger.info(s"GIZMO_SERVER_PORT=${env.get("GIZMO_SERVER_PORT")}")
+    logger.info(s"GIZMOSQL_USERNAME=${env.get("GIZMOSQL_USERNAME")}")
+    logger.info(s"JWT_SECRET_KEY=${env.get("JWT_SECRET_KEY")}")
 
     // Pass the port to the script as an environment variable (or argument if needed, but sticking to env for now)
     // The script likely expects PORT env var or similar.
@@ -60,26 +73,48 @@ class GizmoServerManager(
         // Fail fast: Stop the proxy server too so ProcessManager detects it
         // We can do this by exiting the JVM, which is monitored by ProcessManager
         logger.error("Initiating Proxy Server shutdown due to backend failure")
-        System.exit(1)
+        try
+          System.out.println("Attempting to exit...")
+          Runtime.getRuntime().halt(1)
+        catch
+          case se: SecurityException =>
+            System.err.println("SecurityManager prevented exit: " + se.getMessage)
     }
 
     // Gobblers
     new Thread(() => {
       val scanner = new java.util.Scanner(p.getInputStream)
       while (scanner.hasNextLine) {
-        logger.debug(s"[Gizmo Backend] ${scanner.nextLine()}")
+        val line = scanner.nextLine()
+        logger.info(s"[Gizmo Backend] $line")
       }
     }).start()
 
     new Thread(() => {
       val scanner = new java.util.Scanner(p.getErrorStream)
       while (scanner.hasNextLine) {
-        logger.debug(s"[Gizmo Backend Error] ${scanner.nextLine()}")
+        val line = scanner.nextLine()
+        logger.error(s"[Gizmo Backend Error] $line")
       }
     }).start()
 
     val pid = p.pid()
     logger.info(s"Backend Gizmo server started (PID: $pid)")
+
+    // Give the container a moment to start
+    Thread.sleep(5000)
+
+    // Check if it's still alive
+    if (!p.isAlive) {
+      logger.error(
+        s"Backend Gizmo server died immediately with exit code: ${p.exitValue()}"
+      )
+      throw new RuntimeException(
+        s"Backend Gizmo server failed to start (exit code: ${p.exitValue()})"
+      )
+    }
+
+    logger.info(s"Backend Gizmo server confirmed running (PID: $pid)")
 
   private def cleanupPort(port: Int): Unit =
     try
