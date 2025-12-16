@@ -312,6 +312,7 @@ class ProcessManager extends LazyLogging:
     logger.info(s"Scanning for processes on ports $minPort-$maxPort...")
     for port <- minPort to maxPort do
       if killProcessOnPort(port) then
+        killProcessOnPort(port+1000)
         logger.info(s"Found and killed process on port $port")
         totalStopped += 1
 
