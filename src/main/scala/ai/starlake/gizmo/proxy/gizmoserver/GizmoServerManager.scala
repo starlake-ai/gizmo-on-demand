@@ -1,10 +1,7 @@
 package ai.starlake.gizmo.proxy.gizmoserver
 
-import ai.starlake.gizmo.proxy.ProxyServer
-import cats.effect.{IO, Resource}
 import com.typesafe.scalalogging.LazyLogging
 
-import java.io.File
 
 class GizmoServerManager(
     port: Int,
@@ -17,7 +14,7 @@ class GizmoServerManager(
 
   @volatile private var process: Option[java.lang.Process] = None
 
-  def start(): IO[Unit] = IO:
+  def start(): Unit =
     logger.info(
       s"Starting Backend Gizmo server on port $port using script: ${EnvVars.defaultGizmoScript}"
     )
@@ -45,17 +42,6 @@ class GizmoServerManager(
     logger.info(s"GIZMO_SERVER_PORT=${env.get("GIZMO_SERVER_PORT")}")
     logger.info(s"GIZMOSQL_USERNAME=${env.get("GIZMOSQL_USERNAME")}")
     logger.info(s"JWT_SECRET_KEY=${env.get("JWT_SECRET_KEY")}")
-
-    // Pass the port to the script as an environment variable (or argument if needed, but sticking to env for now)
-    // The script likely expects PORT env var or similar.
-    // ProcessManager.startProcess sets PG_PORT etc.
-    // We should ensure the process inherits the current environment, which ProcessBuilder does by default.
-    // We can also explicitly overwrite the port if the script expects a specific variable.
-    // For now, assuming script uses relevant env vars that we will set in ProcessManager when starting the proxy.
-
-    // Redirect output to logger via gobblers (simplified here or reuse)
-    // For now, inherit IO to see output in console or simple gobbler
-    // processBuilder.inheritIO()
 
     // Clean up any orphaned process on the target port before starting
     cleanupPort(port)
@@ -138,7 +124,7 @@ class GizmoServerManager(
       case e: Exception =>
         logger.warn(s"Failed to cleanup port $port: ${e.getMessage}")
 
-  def stop(): IO[Unit] = IO:
+  def stop(): Unit =
     logger.info("Stopping Backend Gizmo server...")
     process.foreach { p =>
       // Graceful termination
@@ -152,13 +138,9 @@ class GizmoServerManager(
     logger.info("Backend Gizmo server stopped")
 
 object GizmoServerManager:
-  def resource(
+  def apply(
       port: Int,
       initSqlCommands: String,
       envVars: Map[String, String]
-  ): Resource[IO, GizmoServerManager] =
-    Resource.make(
-      IO:
-        val manager = new GizmoServerManager(port, initSqlCommands, envVars)
-        manager
-    )(manager => manager.stop())
+  ): GizmoServerManager =
+    new GizmoServerManager(port, initSqlCommands, envVars)
