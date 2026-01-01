@@ -33,3 +33,10 @@ object EnvVars:
 
   /** API key required for authentication */
   val apiKey: Option[String] = config.apiKey
+
+  /** Idle timeout in seconds for the gizmo backend server
+    * >0: Timeout in seconds, the gizmo backend server is stopped after the timeout period if there are no requests
+    * <0: No timeout (default), the gizmo backend server is never stopped
+    * =0: The gizmo backend server is stopped immediately after each request is processed
+    */
+  val idleTimeout: Int = config.idleTimeout

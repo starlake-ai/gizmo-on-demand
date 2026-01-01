@@ -82,7 +82,7 @@ class ProcessManager extends LazyLogging:
       val requiredVars = Seq(
         "GIZMOSQL_USERNAME",
         "GIZMOSQL_PASSWORD",
-        "SL_PROJECT_ID",
+        "SL_DB_ID",
         "SL_DATA_PATH",
         "PG_USERNAME",
         "PG_PASSWORD",

@@ -48,15 +48,16 @@ These variables control the main management service:
 | `SL_GIZMO_DEFAULT_SCRIPT` | `/opt/gizmosql/scripts/docker-start-sl-gizmosql.sh` | Script to start the backend GizmoSQL process                                                                     |
 | `SL_GIZMO_API_KEY`        | -                                         | **Required**. API Key for authentication                                                                         |
 | `SL_GIZMO_DATA_PATHS`     | -                                         | Space-separated list of absolute paths to mount as Docker volumes (required for DuckLake local file stores only) |
+| `SL_GIZMO_IDLE_TIMEOUT`   | `-1`                                      | Idle timeout in seconds for the backend server: `>0` stops after timeout, `<0` never stops (default), `=0` stops immediately after each request |
 
 ### Database Connection Configuration
 These variables configure the connection to the PostgreSQL metadata database:
 
-| Environment Variable | Default | Description |
-|----------------------|---------|-------------|
-| `SL_PROJECT_ID`      | -       | Project identifier |
-| `PG_HOST`            | `host.docker.internal` | PostgreSQL host |
-| `PG_PORT`            | `5432`  | PostgreSQL port |
+| Environment Variable | Default | Description         |
+|----------------------|---------|---------------------|
+| `SL_DB_ID`      | -       | Database identifier |
+| `PG_HOST`            | `host.docker.internal` | PostgreSQL host     |
+| `PG_PORT`            | `5432`  | PostgreSQL port     |
 | `PG_USERNAME`        | `postgres` | PostgreSQL username |
 | `PG_PASSWORD`        | -       | PostgreSQL password |
 

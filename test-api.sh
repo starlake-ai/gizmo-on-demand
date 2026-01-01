@@ -19,14 +19,14 @@ echo "1. Starting process 'app1' with required environment variables..."
 curl -X POST "$BASE_URL/api/process/start" \
   -H "Content-Type: application/json" \
   $AUTH_HEADER \
-  -d '{"processName": "app1", "arguments": {"GIZMOSQL_USERNAME": "admin", "GIZMOSQL_PASSWORD": "pass123", "SL_PROJECT_ID": "project-001", "SL_DATA_PATH": "/data/starlake", "PG_USERNAME": "postgres", "PG_PASSWORD": "pgpass", "PG_PORT": "5432", "PG_HOST": "localhost"}}' \
+  -d '{"processName": "app1", "arguments": {"GIZMOSQL_USERNAME": "admin", "GIZMOSQL_PASSWORD": "pass123", "SL_DB_ID": "project-001", "SL_DATA_PATH": "/data/starlake", "PG_USERNAME": "postgres", "PG_PASSWORD": "pgpass", "PG_PORT": "5432", "PG_HOST": "localhost"}}' \
   -w "\n\n"
 
 echo "2. Starting process 'app2' with required and optional environment variables..."
 curl -X POST "$BASE_URL/api/process/start" \
   -H "Content-Type: application/json" \
   $AUTH_HEADER \
-  -d '{"processName": "app2", "arguments": {"GIZMOSQL_USERNAME": "user2", "GIZMOSQL_PASSWORD": "secret456", "SL_PROJECT_ID": "project-002", "SL_DATA_PATH": "/data/starlake2", "PG_USERNAME": "postgres", "PG_PASSWORD": "pgpass2", "PG_PORT": "5433", "PG_HOST": "db.example.com", "LOG_LEVEL": "DEBUG"}}' \
+  -d '{"processName": "app2", "arguments": {"GIZMOSQL_USERNAME": "user2", "GIZMOSQL_PASSWORD": "secret456", "SL_DB_ID": "project-002", "SL_DATA_PATH": "/data/starlake2", "PG_USERNAME": "postgres", "PG_PASSWORD": "pgpass2", "PG_PORT": "5433", "PG_HOST": "db.example.com", "LOG_LEVEL": "DEBUG"}}' \
   -w "\n\n"
 
 echo "3. Listing all processes..."

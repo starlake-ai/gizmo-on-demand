@@ -12,7 +12,7 @@ export SL_GIZMO_DEFAULT_SCRIPT="${SL_GIZMO_DEFAULT_SCRIPT:-/Users/hayssams/git/p
 export SL_GIZMO_PROXY_SCRIPT="${SL_GIZMO_PROXY_SCRIPT:-/Users/hayssams/git/public/gizmo-on-demand/local-start-proxy.sh}"
 
 # Database connection settings for INIT_SQL_COMMANDS
-export SL_PROJECT_ID="${SL_PROJECT_ID:-tpch2}"
+export SL_DB_ID="${SL_DB_ID:-tpch2}"
 export PG_HOST="${PG_HOST:-host.docker.internal}"
 export PG_PORT="${PG_PORT:-5432}"
 export PG_USERNAME="${PG_USERNAME:-postgres}"

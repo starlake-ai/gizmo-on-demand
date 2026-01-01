@@ -38,31 +38,36 @@ object ProxyServer extends LazyLogging:
     val s3SecretSql = (env.get("AWS_KEY_ID"), env.get("AWS_SECRET"), env.get("AWS_REGION")) match
       case (Some(keyId), Some(secret), Some(region)) =>
         val scopePart = env.get("AWS_SCOPE").map(scope => s", SCOPE '$scope'").getOrElse("")
-        s"""CREATE OR REPLACE PERSISTENT SECRET s3_{{SL_PROJECT_ID}}
+        s"""CREATE OR REPLACE PERSISTENT SECRET s3_{{SL_DB_ID}}
            |   (TYPE s3, KEY_ID '$keyId', SECRET '$secret', REGION '$region'$scopePart);""".stripMargin
       case _ => ""
 
     val initSqlTemplate =
-      s"""CREATE OR REPLACE PERSISTENT SECRET pg_{{SL_PROJECT_ID}}
-        |   (TYPE postgres, HOST '{{PG_HOST}}',PORT {{PG_PORT}}, DATABASE {{SL_PROJECT_ID}}, USER '{{PG_USERNAME}}',PASSWORD '{{PG_PASSWORD}}');
+      s"""CREATE OR REPLACE PERSISTENT SECRET pg_{{SL_DB_ID}}
+        |   (TYPE postgres, HOST '{{PG_HOST}}',PORT {{PG_PORT}}, DATABASE {{SL_DB_ID}}, USER '{{PG_USERNAME}}',PASSWORD '{{PG_PASSWORD}}');
         |$s3SecretSql
-        |CREATE OR REPLACE PERSISTENT SECRET {{SL_PROJECT_ID}}
-        |   (TYPE ducklake, METADATA_PATH '',DATA_PATH '{{SL_DATA_PATH}}', METADATA_PARAMETERS MAP {'TYPE': 'postgres', 'SECRET': 'pg_{{SL_PROJECT_ID}}'});
-        |ATTACH IF NOT EXISTS 'ducklake:{{SL_PROJECT_ID}}' AS {{SL_PROJECT_ID}} (READ_ONLY);
-        |USE {{SL_PROJECT_ID}};""".stripMargin
+        |CREATE OR REPLACE PERSISTENT SECRET {{SL_DB_ID}}
+        |   (TYPE ducklake, METADATA_PATH '',DATA_PATH '{{SL_DATA_PATH}}', METADATA_PARAMETERS MAP {'TYPE': 'postgres', 'SECRET': 'pg_{{SL_DB_ID}}'});
+        |ATTACH IF NOT EXISTS 'ducklake:{{SL_DB_ID}}' AS {{SL_DB_ID}} (READ_ONLY);
+        |USE {{SL_DB_ID}};""".stripMargin
 
     val initSqlCommands = initSqlTemplate
-      .replace("{{SL_PROJECT_ID}}", env.getOrElse("SL_PROJECT_ID", ""))
+      .replace("{{SL_DB_ID}}", env.getOrElse("SL_DB_ID", ""))
       .replace("{{PG_HOST}}", env.getOrElse("PG_HOST", ""))
       .replace("{{PG_PORT}}", env.getOrElse("PG_PORT", "5432"))
       .replace("{{PG_USERNAME}}", env.getOrElse("PG_USERNAME", ""))
       .replace("{{PG_PASSWORD}}", env.getOrElse("PG_PASSWORD", ""))
       .replace("{{SL_DATA_PATH}}", env.getOrElse("SL_DATA_PATH", ""))
 
+    // Get idle timeout from EnvVars
+    import ai.starlake.gizmo.ondemand.EnvVars
+    val idleTimeout = EnvVars.idleTimeout
+    logger.info(s"Idle timeout configuration: $idleTimeout seconds")
+
     // Start Gizmo server if port is provided via command line
     val gizmoServerManager: GizmoServerManager | Null = gizmoServerPort match
       case Some(port) =>
-        val manager = GizmoServerManager(port, initSqlCommands, sys.env)
+        val manager = GizmoServerManager(port, initSqlCommands, sys.env, idleTimeout)
         logger.info(s"Gizmo server port specified: $port")
         manager.start()
         manager
@@ -84,7 +89,7 @@ object ProxyServer extends LazyLogging:
     val allocator = new RootAllocator(Long.MaxValue)
 
     // Create proxy producer (it will manage backend connections per user)
-    val proxyProducer = new FlightSqlProxy(config, validator, allocator)
+    val proxyProducer = new FlightSqlProxy(config, validator, allocator, Option(gizmoServerManager))
 
     // Determine if TLS should be used (only if enabled AND cert files are provided)
     val useTls = config.proxy.tls.enabled &&

@@ -11,7 +11,8 @@ case class GizmoOnDemandConfig(
     maxProcesses: Int,
     defaultGizmoScript: String,
     proxyScript: String,
-    apiKey: Option[String]
+    apiKey: Option[String],
+    idleTimeout: Int
 )
 
 object GizmoOnDemandConfig:

@@ -92,7 +92,7 @@ export LOG_LEVEL="${LOG_LEVEL:-DEBUG}"
 export LOG_STATEMENTS="${LOG_STATEMENTS:-true}"
 export LOG_VALIDATION="${LOG_VALIDATION:-true}"
 
-export SL_PROJECT_ID="${SL_PROJECT_ID:-tpch2}"
+export SL_DB_ID="${SL_DB_ID:-tpch2}"
 export PG_HOST="${PG_HOST:-host.docker.internal}"
 export PG_PORT=${PG_PORT:-5432}
 export PG_USERNAME="${PG_USERNAME:-postgres}"
@@ -102,6 +102,8 @@ export SL_DATA_PATH="${SL_DATA_PATH:-/Users/hayssams/git/starlake-api/starlake-a
 export GIZMOSQL_USERNAME="${GIZMOSQL_USERNAME:-gizmosql_username}"
 export GIZMOSQL_PASSWORD="${GIZMOSQL_PASSWORD:-gizmosql_password}"
 export JWT_SECRET_KEY="${JWT_SECRET_KEY:-a_very_secret_key}"
+
+export SL_GIZMO_IDLE_TIMEOUT="${SL_GIZMO_IDLE_TIMEOUT:-20}"
 
 echo "========================================="
 echo "  GizmoSQL Proxy Server"

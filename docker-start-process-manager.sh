@@ -16,7 +16,7 @@ export SL_GIZMO_MAX_PROCESSES="${SL_GIZMO_MAX_PROCESSES:-10}"
 export SL_GIZMO_API_KEY="${SL_GIZMO_API_KEY:-a_secret_api_key}"
 
 # Database connection settings
-export SL_PROJECT_ID="${SL_PROJECT_ID:-tpch2}"
+export SL_DB_ID="${SL_DB_ID:-tpch2}"
 export PG_HOST="${PG_HOST:-host.docker.internal}"
 export PG_PORT="${PG_PORT:-5432}"
 export PG_USERNAME="${PG_USERNAME:-postgres}"
@@ -29,6 +29,8 @@ export JWT_SECRET_KEY="${JWT_SECRET_KEY:-a_very_secret_key}"
 
 # Host port to expose the process manager
 export HOST_PORT="${HOST_PORT:-31339}"
+
+export SL_GIZMO_IDLE_TIMEOUT="${SL_GIZMO_IDLE_TIMEOUT:-20}"
 
 echo "========================================="
 echo "  GizmoSQL Process Manager (Docker)"
@@ -72,7 +74,7 @@ docker run --rm \
     -e SL_GIZMO_MAX_PORT="$SL_GIZMO_MAX_PORT" \
     -e SL_GIZMO_MAX_PROCESSES="$SL_GIZMO_MAX_PROCESSES" \
     -e SL_GIZMO_API_KEY="$SL_GIZMO_API_KEY" \
-    -e SL_PROJECT_ID="$SL_PROJECT_ID" \
+    -e SL_DB_ID="$SL_DB_ID" \
     -e PG_HOST="$PG_HOST" \
     -e PG_PORT="$PG_PORT" \
     -e PG_USERNAME="$PG_USERNAME" \
@@ -80,5 +82,6 @@ docker run --rm \
     -e GIZMOSQL_USERNAME="$GIZMOSQL_USERNAME" \
     -e GIZMOSQL_PASSWORD="$GIZMOSQL_PASSWORD" \
     -e JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+    -e SL_GIZMO_IDLE_TIMEOUT="$SL_GIZMO_IDLE_TIMEOUT" \
     "$IMAGE_NAME"
 

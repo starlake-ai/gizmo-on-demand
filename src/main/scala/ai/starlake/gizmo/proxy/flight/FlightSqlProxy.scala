@@ -1,6 +1,7 @@
 package ai.starlake.gizmo.proxy.flight
 
 import ai.starlake.gizmo.proxy.config.GizmoSqlProxyConfig
+import ai.starlake.gizmo.proxy.gizmoserver.GizmoServerManager
 import ai.starlake.gizmo.proxy.validation.{
   Allowed,
   Denied,
@@ -25,9 +26,18 @@ import scala.jdk.CollectionConverters.*
 class FlightSqlProxy(
     config: GizmoSqlProxyConfig,
     validator: StatementValidator,
-    allocator: RootAllocator
+    allocator: RootAllocator,
+    gizmoServerManager: Option[GizmoServerManager]
 ) extends NoOpFlightSqlProducer,
       LazyLogging:
+
+  /** Record activity on the gizmo server manager (for idle timeout) */
+  private def recordActivity(): Unit =
+    gizmoServerManager.foreach(_.recordActivity())
+
+  /** Notify request completion (for immediate shutdown mode) */
+  private def onRequestComplete(): Unit =
+    gizmoServerManager.foreach(_.onRequestComplete())
 
   val backendClients = new ConcurrentHashMap[String, FlightClient]()
   val handshakeCredentials = new ConcurrentHashMap[String, String]()
@@ -66,6 +76,7 @@ class FlightSqlProxy(
       ticket: Ticket,
       listener: FlightProducer.ServerStreamListener
   ): Unit =
+    recordActivity()
     try
       val stream = getBackendClient(context).getStream(ticket)
       listener.start(stream.getRoot)
@@ -75,12 +86,15 @@ class FlightSqlProxy(
       case e: Exception =>
         logger.error("Error in getStream", e)
         listener.error(e)
+    finally
+      onRequestComplete()
 
   override def listFlights(
       context: FlightProducer.CallContext,
       criteria: Criteria,
       listener: FlightProducer.StreamListener[FlightInfo]
   ): Unit =
+    recordActivity()
     try
       getBackendClient(context)
         .listFlights(criteria)
@@ -91,11 +105,14 @@ class FlightSqlProxy(
       case e: Exception =>
         logger.error("Error in listFlights", e)
         listener.onError(e)
+    finally
+      onRequestComplete()
 
   override def getFlightInfo(
       context: FlightProducer.CallContext,
       descriptor: FlightDescriptor
   ): FlightInfo =
+    recordActivity()
     try
       val command = descriptor.getCommand
       if command != null && command.nonEmpty then
@@ -139,13 +156,17 @@ class FlightSqlProxy(
       case e: Exception =>
         logger.error(s"Error in getFlightInfo: ${e.getMessage}", e)
         throw e
+    finally
+      onRequestComplete()
 
   override def acceptPut(
       context: FlightProducer.CallContext,
       flightStream: FlightStream,
       ackStream: FlightProducer.StreamListener[PutResult]
   ): Runnable =
+    recordActivity()
     val client = getBackendClient(context)
+    val proxy = this
     new Runnable:
       override def run(): Unit =
         try
@@ -163,11 +184,14 @@ class FlightSqlProxy(
           case e: Exception =>
             logger.error("Error in acceptPut", e)
             ackStream.onError(e)
+        finally
+          proxy.onRequestComplete()
 
   override def listActions(
       context: FlightProducer.CallContext,
       listener: FlightProducer.StreamListener[ActionType]
   ): Unit =
+    recordActivity()
     try
       getBackendClient(context).listActions().asScala.foreach(listener.onNext)
       listener.onCompleted()
@@ -175,12 +199,15 @@ class FlightSqlProxy(
       case e: Exception =>
         logger.error("Error in listActions", e)
         listener.onError(e)
+    finally
+      onRequestComplete()
 
   override def doAction(
       context: FlightProducer.CallContext,
       action: Action,
       listener: FlightProducer.StreamListener[Result]
   ): Unit =
+    recordActivity()
     try
       getBackendClient(context)
         .doAction(action)
@@ -191,12 +218,18 @@ class FlightSqlProxy(
       case e: Exception =>
         logger.error("Error in doAction", e)
         listener.onError(e)
+    finally
+      onRequestComplete()
 
   override def getSchema(
       context: FlightProducer.CallContext,
       descriptor: FlightDescriptor
   ): SchemaResult =
-    getBackendClient(context).getSchema(descriptor)
+    recordActivity()
+    try
+      getBackendClient(context).getSchema(descriptor)
+    finally
+      onRequestComplete()
 
   private def extractUsername(context: FlightProducer.CallContext): String =
     Option(context.peerIdentity()).filter(_.nonEmpty).getOrElse("unknown")

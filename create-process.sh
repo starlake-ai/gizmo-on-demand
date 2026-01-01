@@ -6,12 +6,12 @@ API_KEY="${SL_GIZMO_API_KEY:-a_secret_api_key}"
 PROCESS_NAME="${1:-my-gizmo-session}"
 
 # Database connection settings
-SL_PROJECT_ID="${SL_PROJECT_ID:-tpch2}"
+SL_DB_ID="${SL_DB_ID:-tpch0001}"
 PG_HOST="${PG_HOST:-host.docker.internal}"
 PG_PORT="${PG_PORT:-5432}"
 PG_USERNAME="${PG_USERNAME:-postgres}"
 PG_PASSWORD="${PG_PASSWORD:-azizam}"
-SL_DATA_PATH="${SL_DATA_PATH:-/Users/hayssams/git/starlake-api/starlake-api-samples/100/177/ducklake_files/tpch2}"
+SL_DATA_PATH="${SL_DATA_PATH:-/Users/hayssams/git/starlake-api/starlake-api-samples/100/101/ducklake_files/tpch0001}"
 
 # GizmoSQL credentials
 GIZMOSQL_USERNAME="${GIZMOSQL_USERNAME:-gizmosql_username}"
@@ -25,7 +25,7 @@ JSON_PAYLOAD=$(cat <<EOF
 {
     "processName": "$PROCESS_NAME",
     "arguments": {
-        "SL_PROJECT_ID": "$SL_PROJECT_ID",
+        "SL_DB_ID": "$SL_DB_ID",
         "PG_HOST": "$PG_HOST",
         "PG_PORT": "$PG_PORT",
         "PG_USERNAME": "$PG_USERNAME",
@@ -35,7 +35,8 @@ JSON_PAYLOAD=$(cat <<EOF
         "GIZMOSQL_PASSWORD": "$GIZMOSQL_PASSWORD",
         "GIZMOSQL_LOG_LEVEL": "debug",
         "DATABASE_FILENAME": ":memory:",
-        "JWT_SECRET_KEY": "$JWT_SECRET_KEY"
+        "JWT_SECRET_KEY": "$JWT_SECRET_KEY",
+        "SL_GIZMO_IDLE_TIMEOUT": "20"
     }
 }
 EOF
