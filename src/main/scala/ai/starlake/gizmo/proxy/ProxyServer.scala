@@ -35,13 +35,21 @@ object ProxyServer extends LazyLogging:
     val env = sys.env
 
     // Build S3 secret SQL if AWS credentials are provided
-    val s3SecretSql = (env.get("AWS_KEY_ID"), env.get("AWS_SECRET"), env.get("AWS_REGION")) match
-      case (Some(keyId), Some(secret), Some(region)) =>
+    val s3SecretSql = (env.get("AWS_KEY_ID"), env.get("AWS_SECRET"), env.get("AWS_REGION"), env.get("AWS_ENDPOINT")) match
+      case (Some(keyId), Some(secret), Some(region), Some(endpoint)) =>
         val scopePart = env.get("AWS_SCOPE").map(scope => s", SCOPE '$scope'").getOrElse("")
         s"""CREATE OR REPLACE PERSISTENT SECRET s3_{{SL_DB_ID}}
-           |   (TYPE s3, KEY_ID '$keyId', SECRET '$secret', REGION '$region'$scopePart);""".stripMargin
+           |   (TYPE s3, KEY_ID '$keyId', SECRET '$secret', REGION '$region'$scopePart, ENDPOINT '$endpoint');""".stripMargin
       case _ => ""
 
+
+    /**
+     * Build INIT_SQL_COMMANDS from template and environment variables
+     * - pg_??. contains the credentials to connect to the Postgres database
+     * - s3_{{SL_DB_ID}} contains the credentials to access the S3 bucket where the metadata is stored
+     * - {{SL_DB_ID}} contains the credentials to access the DuckDB database and references the Postgres database credentials
+     *    and the S3 bucket in the DATA_PATH parameter
+     */
     val initSqlTemplate =
       s"""CREATE OR REPLACE PERSISTENT SECRET pg_{{SL_DB_ID}}
         |   (TYPE postgres, HOST '{{PG_HOST}}',PORT {{PG_PORT}}, DATABASE {{SL_DB_ID}}, USER '{{PG_USERNAME}}',PASSWORD '{{PG_PASSWORD}}');
