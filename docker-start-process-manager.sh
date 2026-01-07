@@ -5,7 +5,7 @@ set -e
 
 # Configuration
 CONTAINER_NAME="gizmo-on-demand"
-IMAGE_NAME="starlakeai/gizmo-on-demand:latest"
+IMAGE_NAME="starlakeai/gizmo-on-demand:latest-snapshot"
 
 # Process Manager Configuration
 export SL_GIZMO_ON_DEMAND_HOST="${SL_GIZMO_ON_DEMAND_HOST:-0.0.0.0}"
@@ -28,7 +28,7 @@ export GIZMOSQL_PASSWORD="${GIZMOSQL_PASSWORD:-gizmosql_password}"
 export JWT_SECRET_KEY="${JWT_SECRET_KEY:-a_very_secret_key}"
 
 # Host port to expose the process manager
-export HOST_PORT="${HOST_PORT:-31339}"
+export HOST_PORT="${HOST_PORT:-10900}"
 
 export SL_GIZMO_IDLE_TIMEOUT="${SL_GIZMO_IDLE_TIMEOUT:-20}"
 
