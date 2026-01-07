@@ -41,6 +41,7 @@ object Main extends LazyLogging:
           case Right(_)    =>
             processManager.startProcess(
               request.processName,
+              request.connectionName,
               request.arguments
             ) match
               case Left(error)     => Left(ErrorResponse(error))

@@ -69,6 +69,7 @@ class ProcessManager extends LazyLogging:
   /** Start a new process */
   def startProcess(
       processName: String,
+      connectionName: String,
       arguments: Map[String, String] = Map.empty
   ): Either[String, StartProcessResponse] =
     if processes.contains(processName) then

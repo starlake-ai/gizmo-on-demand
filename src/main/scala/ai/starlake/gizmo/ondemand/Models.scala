@@ -3,7 +3,7 @@ package ai.starlake.gizmo.ondemand
 import io.circe.generic.auto.* // Automatic derivation - no need for manual given instances
 
 /** Request to start a new process */
-case class StartProcessRequest(processName: String, arguments: Map[String, String] = Map.empty)
+case class StartProcessRequest(processName: String, connectionName: String, arguments: Map[String, String] = Map.empty)
 
 /** Response when a process is started */
 case class StartProcessResponse(processName: String, port: Int, message: String)

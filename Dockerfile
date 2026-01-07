@@ -1,5 +1,5 @@
 # Global ARG for base image version (must be before first FROM)
-ARG GIZMO_VERSION=v1.13.4
+ARG GIZMO_VERSION=v1.13.9
 
 # Build stage for Scala application
 FROM eclipse-temurin:17-jdk-jammy AS builder
