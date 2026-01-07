@@ -238,28 +238,6 @@ class ProcessManager extends LazyLogging:
           )
         )
 
-  /** Restart a process */
-  def restartProcess(
-      processName: String
-  ): Either[String, RestartProcessResponse] =
-    // Get the original arguments before stopping
-    val originalArguments =
-      processes.get(processName).map(_.arguments).getOrElse(Map.empty)
-
-    stopProcess(processName) match
-      case Left(error) => Left(error)
-      case Right(_)    =>
-        startProcess(processName, originalArguments) match
-          case Left(error)          => Left(error)
-          case Right(startResponse) =>
-            Right(
-              RestartProcessResponse(
-                processName = processName,
-                port = startResponse.port,
-                message =
-                  s"Process restarted successfully on port ${startResponse.port}"
-              )
-            )
 
   /** List all running processes */
   def listProcesses: ListProcessesResponse =

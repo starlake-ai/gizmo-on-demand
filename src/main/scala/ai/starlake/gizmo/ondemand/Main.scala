@@ -58,16 +58,6 @@ object Main extends LazyLogging:
               case Right(response) => Right(response)
     }
 
-    val restartProcessEndpoint = ProcessEndpoints.restartProcess.handle {
-      case (apiKey, request) =>
-        validateApiKey(apiKey) match
-          case Left(error) => Left(error)
-          case Right(_)    =>
-            processManager.restartProcess(request.processName) match
-              case Left(error)     => Left(ErrorResponse(error))
-              case Right(response) => Right(response)
-    }
-
     val listProcessesEndpoint = ProcessEndpoints.listProcesses.handle {
       apiKey =>
         validateApiKey(apiKey) match
@@ -93,7 +83,6 @@ object Main extends LazyLogging:
       .addEndpoint(healthEndpoint)
       .addEndpoint(startProcessEndpoint)
       .addEndpoint(stopProcessEndpoint)
-      .addEndpoint(restartProcessEndpoint)
       .addEndpoint(listProcessesEndpoint)
       .addEndpoint(stopAllEndpoint)
       .start()
