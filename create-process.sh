@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # Configuration
-PROCESS_MANAGER_URL="${PROCESS_MANAGER_URL:-http://localhost:31339}"
+PROCESS_MANAGER_URL="${PROCESS_MANAGER_URL:-http://localhost:10900}"
 API_KEY="${SL_GIZMO_API_KEY:-a_secret_api_key}"
 PROCESS_NAME="${1:-my-gizmo-session}"
 
 # Database connection settings
 SL_DB_ID="${SL_DB_ID:-tpch0001}"
-PG_HOST="${PG_HOST:-host.docker.internal}"
+PG_HOST="${PG_HOST:-localhost}"
 PG_PORT="${PG_PORT:-5432}"
 PG_USERNAME="${PG_USERNAME:-postgres}"
 PG_PASSWORD="${PG_PASSWORD:-azizam}"
@@ -36,7 +36,7 @@ JSON_PAYLOAD=$(cat <<EOF
         "GIZMOSQL_LOG_LEVEL": "debug",
         "DATABASE_FILENAME": ":memory:",
         "JWT_SECRET_KEY": "$JWT_SECRET_KEY",
-        "SL_GIZMO_IDLE_TIMEOUT": "20"
+        "SL_GIZMO_IDLE_TIMEOUT": "-1"
     }
 }
 EOF

@@ -30,7 +30,7 @@ export JWT_SECRET_KEY="${JWT_SECRET_KEY:-a_very_secret_key}"
 # Host port to expose the process manager
 export HOST_PORT="${HOST_PORT:-10900}"
 
-export SL_GIZMO_IDLE_TIMEOUT="${SL_GIZMO_IDLE_TIMEOUT:-20}"
+export SL_GIZMO_IDLE_TIMEOUT="${SL_GIZMO_IDLE_TIMEOUT:--1}"
 
 echo "========================================="
 echo "  GizmoSQL Process Manager (Docker)"

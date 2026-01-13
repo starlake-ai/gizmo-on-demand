@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Configuration
-PROCESS_MANAGER_URL="${PROCESS_MANAGER_URL:-http://localhost:31339}"
+PROCESS_MANAGER_URL="${PROCESS_MANAGER_URL:-http://localhost:10900}"
 API_KEY="${SL_GIZMO_API_KEY:-a_secret_api_key}"
 PROCESS_NAME="${1:-my-gizmo-session}"
 

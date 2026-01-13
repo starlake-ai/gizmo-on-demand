@@ -93,7 +93,7 @@ export LOG_STATEMENTS="${LOG_STATEMENTS:-true}"
 export LOG_VALIDATION="${LOG_VALIDATION:-true}"
 
 export SL_DB_ID="${SL_DB_ID:-tpch2}"
-export PG_HOST="${PG_HOST:-host.docker.internal}"
+export PG_HOST="${PG_HOST:-localhost}"
 export PG_PORT=${PG_PORT:-5432}
 export PG_USERNAME="${PG_USERNAME:-postgres}"
 export PG_PASSWORD="${PG_PASSWORD:-azizam}"

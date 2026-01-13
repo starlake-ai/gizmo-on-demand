@@ -103,7 +103,7 @@ export GIZMOSQL_USERNAME="${GIZMOSQL_USERNAME:-gizmosql_username}"
 export GIZMOSQL_PASSWORD="${GIZMOSQL_PASSWORD:-gizmosql_password}"
 export JWT_SECRET_KEY="${JWT_SECRET_KEY:-a_very_secret_key}"
 
-export SL_GIZMO_IDLE_TIMEOUT="${SL_GIZMO_IDLE_TIMEOUT:-20}"
+export SL_GIZMO_IDLE_TIMEOUT="${SL_GIZMO_IDLE_TIMEOUT:--1}"
 
 echo "========================================="
 echo "  GizmoSQL Proxy Server"

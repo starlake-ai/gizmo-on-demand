@@ -37,9 +37,17 @@ object ProxyServer extends LazyLogging:
     // Build S3 secret SQL if AWS credentials are provided
     val s3SecretSql = (env.get("AWS_KEY_ID"), env.get("AWS_SECRET"), env.get("AWS_REGION"), env.get("AWS_ENDPOINT")) match
       case (Some(keyId), Some(secret), Some(region), Some(endpoint)) =>
-        val scopePart = env.get("AWS_SCOPE").map(scope => s", SCOPE '$scope'").getOrElse("")
+        val scopePart = "" //env.get("AWS_SCOPE").map(scope => s", SCOPE '$scope'").getOrElse("")
+        val noSchemeEndpoint =
+          if (endpoint.contains("://"))
+            endpoint.split("://").last
+          else
+            endpoint
+        val useSSL = if (endpoint.startsWith("https:")) "true" else "false"
+        val urlStyle = if (noSchemeEndpoint.contains("s3.amazonaws.com")) "vhost" else "path"
+
         s"""CREATE OR REPLACE PERSISTENT SECRET s3_{{SL_DB_ID}}
-           |   (TYPE s3, KEY_ID '$keyId', SECRET '$secret', REGION '$region'$scopePart, ENDPOINT '$endpoint');""".stripMargin
+           |   (TYPE s3, KEY_ID '$keyId', SECRET '$secret', REGION '$region'$scopePart, ENDPOINT '$noSchemeEndpoint', USE_SSL '$useSSL', URL_STYLE '$urlStyle');""".stripMargin
       case _ => ""
 
 
@@ -67,6 +75,7 @@ object ProxyServer extends LazyLogging:
       .replace("{{PG_PASSWORD}}", env.getOrElse("PG_PASSWORD", ""))
       .replace("{{SL_DATA_PATH}}", env.getOrElse("SL_DATA_PATH", ""))
 
+    logger.info(s"INIT_SQL_COMMANDS for backend Gizmo server:\n$initSqlCommands")
     // Get idle timeout from EnvVars
     import ai.starlake.gizmo.ondemand.EnvVars
     val idleTimeout = EnvVars.idleTimeout
