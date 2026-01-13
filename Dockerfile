@@ -28,7 +28,7 @@ RUN sbt update
 COPY src src
 
 # Create distrib directory and build the application
-RUN mkdir -p distrib && sbt assembly
+RUN mkdir -p distrib && sbt clean assembly
 
 # Runtime stage - build on top of gizmodata/gizmosql from Docker Hub
 # Note: GIZMO_VERSION ARG is declared at the top of the file
