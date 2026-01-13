@@ -26,31 +26,37 @@ class ProcessManager extends LazyLogging:
   private val maxPort = EnvVars.maxPort
 
   /** Find and reserve an available port */
-  private def claimAvailablePort(): Either[String, Int] =
+  private def claimAvailablePort(requestedPort: Option[Int]): Either[String, Int] =
     val maxRetries = 100
     var retries = 0
     var foundPort: Option[Int] = None
+    requestedPort match {
+        case Some(port) =>
+          // The caller takes responsibility of the port he is requesting
+          usedPorts.putIfAbsent(port, true)
+          foundPort = Some(port)
+        case None => // Proceed to find a random available port
+          while foundPort.isEmpty && retries < maxRetries do
+            val candidate = minPort + random.nextInt(maxPort - minPort)
+            // Atomically check and set
+            if usedPorts.putIfAbsent(candidate, true).isEmpty then
+              foundPort = Some(candidate)
+            retries += 1
 
-    while foundPort.isEmpty && retries < maxRetries do
-      val candidate = minPort + random.nextInt(maxPort - minPort)
-      // Atomically check and set
-      if usedPorts.putIfAbsent(candidate, true).isEmpty then
-        foundPort = Some(candidate)
-      retries += 1
+    }
 
     foundPort.toRight(
       s"Could not find an available port after $maxRetries attempts"
     )
 
   /** Find and reserve a pair of ports (proxy port, proxy port + 1000) */
-  private def claimPairedPorts(): Either[String, (Int, Int)] =
+  private def claimPairedPorts(requestedPort: Option[Int]): Either[String, (Int, Int)] =
     val maxRetries = 100
     var retries = 0
     var foundPair: Option[(Int, Int)] = None
-
     while foundPair.isEmpty && retries < maxRetries do
       // 1. Claim a primary port
-      claimAvailablePort() match
+      claimAvailablePort(requestedPort) match
         case Left(_)          => retries += 1 // Failed to get primary, retry
         case Right(proxyPort) =>
           val backendPort = proxyPort + 1000
@@ -70,6 +76,7 @@ class ProcessManager extends LazyLogging:
   def startProcess(
       processName: String,
       connectionName: String,
+      port: Option[Int] = None,
       arguments: Map[String, String] = Map.empty
   ): Either[String, StartProcessResponse] =
     if processes.contains(processName) then
@@ -100,7 +107,7 @@ class ProcessManager extends LazyLogging:
         )
       else
         // Reserve ports (proxy + 1000)
-        claimPairedPorts() match
+        claimPairedPorts(port) match
           case Left(error)                     => Left(error)
           case Right((proxyPort, backendPort)) =>
             try
