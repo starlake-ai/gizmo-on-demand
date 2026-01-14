@@ -62,7 +62,7 @@ fi
 docker buildx inspect --bootstrap
 
 # GizmoSQL Base Image Version
-GIZMO_VERSION="${GIZMO_VERSION:-v1.13.4}"
+GIZMO_VERSION="${GIZMO_VERSION:-v1.14.1-slim}"
 print_info "Using GizmoSQL base version: ${GIZMO_VERSION}"
 
 
@@ -81,7 +81,7 @@ if [ "$PUBLISH_TYPE" = "snapshot" ]; then
     # Snapshot version includes timestamp
     TIMESTAMP=$(date +%Y%m%d-%H%M%S)
     VERSION="${BASE_VERSION}-SNAPSHOT-${TIMESTAMP}"
-    TAGS=("${VERSION}" "snapshot" "latest-snapshot")
+    TAGS=("${VERSION}" "snapshot-slim" "latest-snapshot-slim")
     print_info "Publishing SNAPSHOT version: ${VERSION}"
 elif [ "$PUBLISH_TYPE" = "release" ]; then
     # Release version
