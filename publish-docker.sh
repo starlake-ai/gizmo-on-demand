@@ -125,13 +125,14 @@ for TAG in "${TAGS[@]}"; do
     echo "  - ${DOCKER_REPO}:${TAG}"
 done
 
+echo "Published on `date`"
 # If this is a release, ask if we should update the version file
 if [ "$PUBLISH_TYPE" = "release" ]; then
-    echo ""
     print_info "Release published successfully!"
     print_warn "Don't forget to:"
     echo "  1. Tag the git commit: git tag v${VERSION}"
     echo "  2. Push the tag: git push origin v${VERSION}"
     echo "  3. Update version.txt for next development cycle"
 fi
+
 

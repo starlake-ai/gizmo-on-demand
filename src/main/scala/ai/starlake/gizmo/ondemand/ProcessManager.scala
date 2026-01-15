@@ -30,7 +30,6 @@ class ProcessManager extends LazyLogging:
     val maxRetries = 100
     var retries = 0
     var foundPort: Option[Int] = None
-    var index = 1
     requestedPort match {
         case Some(port) =>
           // The caller takes responsibility of the port he is requesting
@@ -38,11 +37,10 @@ class ProcessManager extends LazyLogging:
           foundPort = Some(port)
         case None => // Proceed to find a random available port
           while foundPort.isEmpty && retries < maxRetries do
-            val candidate = minPort + index
+            val candidate = minPort + retries
             // Atomically check and set
             if usedPorts.putIfAbsent(candidate, true).isEmpty then
               foundPort = Some(candidate)
-            index = index + 1
             retries = retries + 1
 
     }
