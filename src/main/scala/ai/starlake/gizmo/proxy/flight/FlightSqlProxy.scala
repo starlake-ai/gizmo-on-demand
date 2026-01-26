@@ -8,9 +8,10 @@ import ai.starlake.gizmo.proxy.validation.{
   StatementValidator,
   ValidationContext
 }
-import cats.effect.unsafe.implicits.global
+
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
+import com.auth0.jwt.interfaces.Claim
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.arrow.flight.*
 import org.apache.arrow.flight.auth.ServerAuthHandler
@@ -86,8 +87,7 @@ class FlightSqlProxy(
       case e: Exception =>
         logger.error("Error in getStream", e)
         listener.error(e)
-    finally
-      onRequestComplete()
+    finally onRequestComplete()
 
   override def listFlights(
       context: FlightProducer.CallContext,
@@ -105,8 +105,7 @@ class FlightSqlProxy(
       case e: Exception =>
         logger.error("Error in listFlights", e)
         listener.onError(e)
-    finally
-      onRequestComplete()
+    finally onRequestComplete()
 
   override def getFlightInfo(
       context: FlightProducer.CallContext,
@@ -141,10 +140,11 @@ class FlightSqlProxy(
                 username = extractUsername(context),
                 database = "default",
                 statement = fullCommandStr,
-                peer = context.peerIdentity()
+                peer = context.peerIdentity(),
+                claims = Option(FlightSqlProxy.currentClaims.get())
+                  .getOrElse(Map.empty)
               )
-            )
-            .unsafeRunSync() match
+            ) match
             case Denied(reason) =>
               throw CallStatus.UNAUTHENTICATED
                 .withDescription(s"Statement execution denied: $reason")
@@ -156,8 +156,7 @@ class FlightSqlProxy(
       case e: Exception =>
         logger.error(s"Error in getFlightInfo: ${e.getMessage}", e)
         throw e
-    finally
-      onRequestComplete()
+    finally onRequestComplete()
 
   override def acceptPut(
       context: FlightProducer.CallContext,
@@ -184,8 +183,7 @@ class FlightSqlProxy(
           case e: Exception =>
             logger.error("Error in acceptPut", e)
             ackStream.onError(e)
-        finally
-          proxy.onRequestComplete()
+        finally proxy.onRequestComplete()
 
   override def listActions(
       context: FlightProducer.CallContext,
@@ -199,8 +197,7 @@ class FlightSqlProxy(
       case e: Exception =>
         logger.error("Error in listActions", e)
         listener.onError(e)
-    finally
-      onRequestComplete()
+    finally onRequestComplete()
 
   override def doAction(
       context: FlightProducer.CallContext,
@@ -218,8 +215,7 @@ class FlightSqlProxy(
       case e: Exception =>
         logger.error("Error in doAction", e)
         listener.onError(e)
-    finally
-      onRequestComplete()
+    finally onRequestComplete()
 
   override def getSchema(
       context: FlightProducer.CallContext,
@@ -243,6 +239,7 @@ object FlightSqlProxy:
   // This is necessary because NoOpAuthHandler doesn't set peer identity
   // Made accessible to proxy package so ProxyServer can use it in auth handler
   private[proxy] val currentUsername = new ThreadLocal[String]()
+  private[proxy] val currentClaims = new ThreadLocal[Map[String, Claim]]()
 
   private def createBackendClientWithAuth(
       config: GizmoSqlProxyConfig,
@@ -352,8 +349,10 @@ object FlightSqlProxy:
 
     override def onCallCompleted(status: CallStatus): Unit =
       FlightSqlProxy.currentUsername.remove()
+      FlightSqlProxy.currentClaims.remove()
     override def onCallErrored(err: Throwable): Unit =
       FlightSqlProxy.currentUsername.remove()
+      FlightSqlProxy.currentClaims.remove()
 
   object AuthMiddleware:
     def createJWTToken(username: String, jwtSecretKey: String): String =
@@ -406,6 +405,11 @@ object FlightSqlProxy:
             AuthMiddleware.createJWTToken(username, config.session.jwtSecretKey)
           val bearerAuthHeader = s"Bearer $jwtToken"
 
+          val decodedMinted = JWT.decode(jwtToken)
+          FlightSqlProxy.currentClaims.set(
+            decodedMinted.getClaims.asScala.toMap
+          )
+
           backendClients.put(
             username,
             createBackendClientWithAuth(
@@ -425,6 +429,7 @@ object FlightSqlProxy:
             .build()
             .verify(authHeader.substring(7))
           val username = decodedJWT.getClaim("sub").asString()
+          FlightSqlProxy.currentClaims.set(decodedJWT.getClaims.asScala.toMap)
 
           if !backendClients.containsKey(username) then
             backendClients.put(

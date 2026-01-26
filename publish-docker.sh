@@ -62,7 +62,7 @@ fi
 docker buildx inspect --bootstrap
 
 # GizmoSQL Base Image Version
-GIZMO_VERSION="${GIZMO_VERSION:-v1.14.1-slim}"
+GIZMO_VERSION="${GIZMO_VERSION:-v1.14.2-slim}"
 print_info "Using GizmoSQL base version: ${GIZMO_VERSION}"
 
 
