@@ -35,10 +35,10 @@ class DefaultStatementValidator(config: ValidationConfig)
     else
       // Log the validation attempt
       logger.info(
-        s"Validating statement for user=${context.username}, " +
+        s">> Validating statement for user=${context.username}, " +
           s"database=${context.database}, peer=${context.peer}"
       )
-      logger.debug(s"Statement: ${context.statement}")
+      logger.info(s">> Statement: ${context.statement}")
 
       // Apply validation rules
       val result = applyRules(context)
