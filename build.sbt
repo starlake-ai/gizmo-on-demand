@@ -50,7 +50,10 @@ lazy val root = (project in file("."))
       // JSQLParser
       Dependencies.jsqlParser,
       Dependencies.jsqlTranspiler,
-      Dependencies.starlakeJdbc
+      Dependencies.starlakeJdbc,
+
+      // Kubernetes
+      Dependencies.kubernetesClient
     ),
     assembly / assemblyMergeStrategy := {
       case PathList("META-INF", "versions", "9", "module-info.class") =>
