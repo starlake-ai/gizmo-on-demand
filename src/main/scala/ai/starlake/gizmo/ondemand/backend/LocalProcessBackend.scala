@@ -144,5 +144,8 @@ class LocalProcessBackend extends ProcessBackend with LazyLogging:
     usedPorts.clear()
     totalStopped
 
+  override def discoverExisting(onExitFactory: String => () => Unit): List[DiscoveredProcess] =
+    List.empty // Local OS processes cannot be re-adopted after JVM restart
+
   override def cleanup(): Unit =
     usedPorts.clear()

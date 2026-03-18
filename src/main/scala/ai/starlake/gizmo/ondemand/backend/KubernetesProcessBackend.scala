@@ -170,30 +170,7 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
           )
 
       // Set up watch for unexpected exits
-      val watch = client
-        .pods()
-        .inNamespace(ns)
-        .withName(pName)
-        .watch(new Watcher[Pod] {
-          override def eventReceived(action: Action, resource: Pod): Unit =
-            action match
-              case Action.DELETED =>
-                logger.warn(s"Pod $pName was deleted unexpectedly")
-                onExit()
-              case Action.MODIFIED =>
-                val phase =
-                  Option(resource.getStatus).flatMap(s => Option(s.getPhase)).getOrElse("")
-                if phase == "Failed" || phase == "Succeeded" then
-                  logger.warn(s"Pod $pName entered terminal phase: $phase")
-                  onExit()
-              case _ => // ignore
-
-          override def onClose(cause: io.fabric8.kubernetes.client.WatcherException): Unit =
-            if cause != null then
-              logger.warn(s"Watch for pod $pName closed with error: ${cause.getMessage}")
-        })
-
-      watches.put(name, watch)
+      setupWatch(pName, ns, name, onExit)
 
       val host = s"$sName.$ns.svc.cluster.local"
       Right(SpawnResult(K8sProcessHandle(pName, sName, ns), host, podProxyPort))
@@ -201,6 +178,95 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
       case e: Exception =>
         logger.error(s"Failed to create K8s resources for '$name'", e)
         Left(s"Failed to start K8s pod: ${e.getMessage}")
+
+  private def setupWatch(pName: String, ns: String, instanceName: String, onExit: () => Unit): Unit =
+    val watch = client
+      .pods()
+      .inNamespace(ns)
+      .withName(pName)
+      .watch(new Watcher[Pod] {
+        override def eventReceived(action: Action, resource: Pod): Unit =
+          action match
+            case Action.DELETED =>
+              logger.warn(s"Pod $pName was deleted unexpectedly")
+              onExit()
+            case Action.MODIFIED =>
+              val phase =
+                Option(resource.getStatus).flatMap(s => Option(s.getPhase)).getOrElse("")
+              if phase == "Failed" || phase == "Succeeded" then
+                logger.warn(s"Pod $pName entered terminal phase: $phase")
+                onExit()
+            case _ => // ignore
+
+        override def onClose(cause: io.fabric8.kubernetes.client.WatcherException): Unit =
+          if cause != null then
+            logger.warn(s"Watch for pod $pName closed with error: ${cause.getMessage}")
+      })
+    watches.put(instanceName, watch)
+
+  override def discoverExisting(onExitFactory: String => () => Unit): List[DiscoveredProcess] =
+    val ns = config.namespace
+    try
+      val pods = client
+        .pods()
+        .inNamespace(ns)
+        .withLabel(managedByLabel, managedByValue)
+        .list()
+        .getItems
+        .asScala
+        .toList
+
+      pods.flatMap { pod =>
+        val podMeta = pod.getMetadata
+        val pName = podMeta.getName
+        val phase = Option(pod.getStatus).flatMap(s => Option(s.getPhase)).getOrElse("")
+
+        if phase != "Running" then
+          logger.info(s"Skipping pod $pName in phase '$phase' during discovery")
+          None
+        else
+          val labels = Option(podMeta.getLabels).map(_.asScala.toMap).getOrElse(Map.empty)
+          val instanceName = labels.getOrElse("gizmo-instance", pName.stripPrefix("gizmo-proxy-"))
+          val sName = serviceName(instanceName)
+
+          // Verify corresponding service exists
+          val svc = client.services().inNamespace(ns).withName(sName).get()
+          if svc == null then
+            logger.warn(s"Pod $pName has no matching service $sName, skipping")
+            None
+          else
+            // Extract env vars from the first container
+            val containerEnvVars = Option(pod.getSpec)
+              .flatMap(s => Option(s.getContainers))
+              .map(_.asScala.toList)
+              .getOrElse(Nil)
+              .headOption
+              .flatMap(c => Option(c.getEnv))
+              .map(_.asScala.toList)
+              .getOrElse(Nil)
+
+            val envMap = containerEnvVars.flatMap { ev =>
+              Option(ev.getName).zip(Option(ev.getValue))
+            }.toMap
+
+            val internalKeys = Set("PROXY_PORT", "PROXY_HOST", "GIZMO_SERVER_HOST", "GIZMO_SERVER_PORT")
+            val arguments = envMap.filterNot { case (k, _) => internalKeys.contains(k) }
+            val proxyPort = envMap.get("PROXY_PORT").flatMap(_.toIntOption).getOrElse(config.proxyPort)
+            val backendPort = envMap.get("GIZMO_SERVER_PORT").flatMap(_.toIntOption).getOrElse(config.backendPort)
+
+            // Re-establish watch
+            setupWatch(pName, ns, instanceName, onExitFactory(instanceName))
+
+            val host = s"$sName.$ns.svc.cluster.local"
+            val handle = K8sProcessHandle(pName, sName, ns)
+
+            logger.info(s"Discovered existing pod $pName (instance=$instanceName, port=$proxyPort)")
+            Some(DiscoveredProcess(instanceName, handle, host, proxyPort, backendPort, arguments))
+      }
+    catch
+      case e: Exception =>
+        logger.error("Failed to discover existing K8s pods", e)
+        List.empty
 
   override def stop(handle: ProcessHandle): Either[String, Unit] =
     handle match

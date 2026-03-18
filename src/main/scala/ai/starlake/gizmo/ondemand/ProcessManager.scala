@@ -20,6 +20,36 @@ class ProcessManager(backend: ProcessBackend) extends LazyLogging:
 
   private val processes = TrieMap.empty[String, ManagedProcess]
 
+  // Recover existing processes on startup (e.g. K8s pods surviving a manager restart)
+  recoverExistingProcesses()
+
+  private def recoverExistingProcesses(): Unit =
+    val onExitFactory: String => () => Unit = processName =>
+      () => {
+        if processes.contains(processName) then
+          logger.warn(s"Recovered Proxy Server '$processName' exited unexpectedly")
+          processes.remove(processName)
+      }
+
+    val discovered = backend.discoverExisting(onExitFactory)
+    discovered.foreach { dp =>
+      val managedProcess = ManagedProcess(
+        name = dp.name,
+        port = dp.port,
+        backendPort = dp.backendPort,
+        handle = dp.handle,
+        host = dp.host,
+        arguments = dp.arguments
+      )
+      processes.putIfAbsent(dp.name, managedProcess) match
+        case Some(_) =>
+          logger.warn(s"Duplicate discovered process '${dp.name}', skipping")
+        case None =>
+          logger.info(s"Recovered process '${dp.name}' (host=${dp.host}, port=${dp.port})")
+    }
+    if discovered.nonEmpty then
+      logger.info(s"Recovered ${discovered.size} existing process(es) from previous lifecycle")
+
   /** Start a new process */
   def startProcess(
       processName: String,

@@ -3,6 +3,16 @@ package ai.starlake.gizmo.ondemand.backend
 /** Result returned by a backend after spawning a process */
 case class SpawnResult(handle: ProcessHandle, host: String, port: Int)
 
+/** A process discovered during startup recovery */
+case class DiscoveredProcess(
+    name: String,
+    handle: ProcessHandle,
+    host: String,
+    port: Int,
+    backendPort: Int,
+    arguments: Map[String, String]
+)
+
 /** Abstract handle to a spawned process — local or remote */
 sealed trait ProcessHandle:
   def pid: Option[Long]
@@ -44,6 +54,13 @@ trait ProcessBackend:
     * @return number of instances stopped
     */
   def stopAll(): Int
+
+  /** Discover processes still running from a previous manager lifecycle.
+    * Used on startup to re-register existing pods/processes.
+    * @param onExitFactory given a process name, returns the onExit callback
+    * @return list of discovered processes
+    */
+  def discoverExisting(onExitFactory: String => () => Unit): List[DiscoveredProcess]
 
   /** Release any resources held by this backend (clients, watches, etc.) */
   def cleanup(): Unit
