@@ -66,6 +66,30 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     backendContainerPort.setName("backend")
     backendContainerPort.setProtocol("TCP")
 
+    // Health check action (shared by probes)
+    val healthAction = new HTTPGetAction()
+    healthAction.setPath(config.healthCheckPath)
+    healthAction.setPort(new IntOrString(config.healthCheckPort))
+
+    // Startup probe — generous: allows slow DuckDB/DuckLake ATTACH on cold start
+    val startupProbe = new Probe()
+    startupProbe.setHttpGet(healthAction)
+    startupProbe.setInitialDelaySeconds(5)
+    startupProbe.setPeriodSeconds(2)
+    startupProbe.setFailureThreshold(30) // 5 + 30*2 = 65s max startup
+
+    // Readiness probe
+    val readinessProbe = new Probe()
+    readinessProbe.setHttpGet(healthAction)
+    readinessProbe.setPeriodSeconds(5)
+    readinessProbe.setFailureThreshold(3)
+
+    // Liveness probe
+    val livenessProbe = new Probe()
+    livenessProbe.setHttpGet(healthAction)
+    livenessProbe.setPeriodSeconds(10)
+    livenessProbe.setFailureThreshold(6)
+
     // Container
     val container = new Container()
     container.setName("gizmo-proxy")
@@ -73,6 +97,9 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     container.setImagePullPolicy(config.imagePullPolicy)
     container.setEnv(containerEnvVars)
     container.setPorts(java.util.List.of(proxyContainerPort, backendContainerPort))
+    container.setStartupProbe(startupProbe)
+    container.setReadinessProbe(readinessProbe)
+    container.setLivenessProbe(livenessProbe)
 
     // Pod spec
     val podSpec = new PodSpec()
