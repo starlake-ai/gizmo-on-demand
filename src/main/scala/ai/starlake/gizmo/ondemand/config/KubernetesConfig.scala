@@ -15,7 +15,8 @@ case class KubernetesConfig(
     labels: Map[String, String],
     startupTimeoutSeconds: Int,
     healthCheckPort: Int,
-    healthCheckPath: String
+    healthCheckPath: String,
+    externalHost: Option[String]
 )
 
 object KubernetesConfig:
