@@ -66,6 +66,41 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     backendContainerPort.setName("backend")
     backendContainerPort.setProtocol("TCP")
 
+    // Resource limits
+    val resourceRequirements = new ResourceRequirements()
+    resourceRequirements.setRequests(Map(
+      "cpu"    -> new Quantity(config.resourceRequestsCpu),
+      "memory" -> new Quantity(config.resourceRequestsMemory)
+    ).asJava)
+    resourceRequirements.setLimits(Map(
+      "cpu"    -> new Quantity(config.resourceLimitsCpu),
+      "memory" -> new Quantity(config.resourceLimitsMemory)
+    ).asJava)
+
+    // Health check action (shared by probes)
+    val healthAction = new HTTPGetAction()
+    healthAction.setPath(config.healthCheckPath)
+    healthAction.setPort(new IntOrString(config.healthCheckPort))
+
+    // Startup probe — generous: allows slow DuckDB/DuckLake ATTACH on cold start
+    val startupProbe = new Probe()
+    startupProbe.setHttpGet(healthAction)
+    startupProbe.setInitialDelaySeconds(5)
+    startupProbe.setPeriodSeconds(2)
+    startupProbe.setFailureThreshold(30) // 5 + 30*2 = 65s max startup
+
+    // Readiness probe
+    val readinessProbe = new Probe()
+    readinessProbe.setHttpGet(healthAction)
+    readinessProbe.setPeriodSeconds(5)
+    readinessProbe.setFailureThreshold(3)
+
+    // Liveness probe
+    val livenessProbe = new Probe()
+    livenessProbe.setHttpGet(healthAction)
+    livenessProbe.setPeriodSeconds(10)
+    livenessProbe.setFailureThreshold(6)
+
     // Container
     val container = new Container()
     container.setName("gizmo-proxy")
@@ -73,6 +108,10 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     container.setImagePullPolicy(config.imagePullPolicy)
     container.setEnv(containerEnvVars)
     container.setPorts(java.util.List.of(proxyContainerPort, backendContainerPort))
+    container.setStartupProbe(startupProbe)
+    container.setReadinessProbe(readinessProbe)
+    container.setLivenessProbe(livenessProbe)
+    container.setResources(resourceRequirements)
 
     // Pod spec
     val podSpec = new PodSpec()
@@ -173,7 +212,7 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
       setupWatch(pName, ns, name, onExit)
 
       val host = s"$sName.$ns.svc.cluster.local"
-      Right(SpawnResult(K8sProcessHandle(pName, sName, ns), host, podProxyPort))
+      Right(SpawnResult(K8sProcessHandle(pName, sName, ns), host, podProxyPort, config.externalHost))
     catch
       case e: Exception =>
         logger.error(s"Failed to create K8s resources for '$name'", e)
@@ -261,7 +300,7 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
             val handle = K8sProcessHandle(pName, sName, ns)
 
             logger.info(s"Discovered existing pod $pName (instance=$instanceName, port=$proxyPort)")
-            Some(DiscoveredProcess(instanceName, handle, host, proxyPort, backendPort, arguments))
+            Some(DiscoveredProcess(instanceName, handle, host, proxyPort, backendPort, arguments, config.externalHost))
       }
     catch
       case e: Exception =>
