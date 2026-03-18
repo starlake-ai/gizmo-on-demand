@@ -58,4 +58,8 @@ object Dependencies {
   val jsqlTranspiler =
     "ai.starlake.jsqltranspiler" % "jsqltranspiler" % Versions.jsqlTranspiler
   val starlakeJdbc = "ai.starlake.jdbc" % "starlakejdbc" % Versions.starlakeJdbc
+
+  // Kubernetes
+  val kubernetesClient =
+    "io.fabric8" % "kubernetes-client" % Versions.fabric8
 }

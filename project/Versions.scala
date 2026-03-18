@@ -13,4 +13,5 @@ object Versions {
   val jsqlParser = "5.4-SNAPSHOT"
   val jsqlTranspiler = "1.8-SNAPSHOT"
   val starlakeJdbc = "0.5-SNAPSHOT"
+  val fabric8 = "7.1.0"
 }

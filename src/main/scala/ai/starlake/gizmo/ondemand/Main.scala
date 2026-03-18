@@ -1,5 +1,6 @@
 package ai.starlake.gizmo.ondemand
 
+import ai.starlake.gizmo.ondemand.backend.*
 import com.typesafe.scalalogging.LazyLogging
 import sttp.tapir.server.jdkhttp.*
 
@@ -23,6 +24,7 @@ object Main extends LazyLogging:
   def main(args: Array[String]): Unit =
     logger.info("Starting Process Manager Server...")
     logger.info(s"Configuration: host=${EnvVars.host}, port=${EnvVars.port}")
+    logger.info(s"Runtime type: ${EnvVars.runtimeType}")
     EnvVars.apiKey match
       case Some(_) => logger.info("API key authentication is ENABLED")
       case None    =>
@@ -30,8 +32,29 @@ object Main extends LazyLogging:
           "API key authentication is DISABLED - set SL_GIZMO_API_KEY to enable"
         )
 
+    // Create the appropriate backend based on runtime type
+    val backend: ProcessBackend = EnvVars.runtimeType.toLowerCase match
+      case "kubernetes" | "k8s" =>
+        EnvVars.kubernetes match
+          case Some(k8sConfig) =>
+            logger.info(s"Using Kubernetes backend (namespace=${k8sConfig.namespace}, image=${k8sConfig.imageName})")
+            new KubernetesProcessBackend(k8sConfig)
+          case None =>
+            throw new IllegalStateException(
+              "Runtime type is 'kubernetes' but no kubernetes configuration found in application.conf"
+            )
+      case _ =>
+        logger.info("Using local process backend")
+        new LocalProcessBackend()
+
+    // Register shutdown hook for backend cleanup
+    Runtime.getRuntime.addShutdownHook(new Thread(() => {
+      logger.info("Shutting down — cleaning up backend resources...")
+      backend.cleanup()
+    }))
+
     // Create the process manager
-    val processManager = new ProcessManager()
+    val processManager = new ProcessManager(backend)
 
     // Define server logic for each endpoint using .handle extension methods
     val startProcessEndpoint = ProcessEndpoints.startProcess.handle {

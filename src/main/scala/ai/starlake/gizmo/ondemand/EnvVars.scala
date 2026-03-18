@@ -1,6 +1,6 @@
 package ai.starlake.gizmo.ondemand
 
-import ai.starlake.gizmo.ondemand.config.GizmoOnDemandConfig
+import ai.starlake.gizmo.ondemand.config.{GizmoOnDemandConfig, KubernetesConfig}
 import pureconfig.ConfigSource
 
 /** Centralized configuration from application.conf via PureConfig */
@@ -40,3 +40,9 @@ object EnvVars:
     * =0: The gizmo backend server is stopped immediately after each request is processed
     */
   val idleTimeout: Int = config.idleTimeout
+
+  /** Runtime type: "local" or "kubernetes" */
+  val runtimeType: String = config.runtimeType
+
+  /** Kubernetes configuration (only used when runtimeType is "kubernetes") */
+  val kubernetes: Option[KubernetesConfig] = config.kubernetes
