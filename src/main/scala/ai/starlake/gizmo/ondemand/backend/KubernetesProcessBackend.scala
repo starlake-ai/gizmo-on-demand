@@ -66,27 +66,27 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     backendContainerPort.setName("backend")
     backendContainerPort.setProtocol("TCP")
 
-    // Health check action (shared by probes)
-    val healthAction = new HTTPGetAction()
-    healthAction.setPath(config.healthCheckPath)
-    healthAction.setPort(new IntOrString(config.healthCheckPort))
+    // TCP socket probe target — the proxy is a gRPC server (Arrow Flight SQL),
+    // not HTTP, so we use tcpSocket on the proxy port to verify it's listening
+    val tcpProbeAction = new TCPSocketAction()
+    tcpProbeAction.setPort(new IntOrString(podProxyPort))
 
     // Startup probe — generous: allows slow DuckDB/DuckLake ATTACH on cold start
     val startupProbe = new Probe()
-    startupProbe.setHttpGet(healthAction)
+    startupProbe.setTcpSocket(tcpProbeAction)
     startupProbe.setInitialDelaySeconds(5)
     startupProbe.setPeriodSeconds(2)
     startupProbe.setFailureThreshold(30) // 5 + 30*2 = 65s max startup
 
     // Readiness probe
     val readinessProbe = new Probe()
-    readinessProbe.setHttpGet(healthAction)
+    readinessProbe.setTcpSocket(tcpProbeAction)
     readinessProbe.setPeriodSeconds(5)
     readinessProbe.setFailureThreshold(3)
 
     // Liveness probe
     val livenessProbe = new Probe()
-    livenessProbe.setHttpGet(healthAction)
+    livenessProbe.setTcpSocket(tcpProbeAction)
     livenessProbe.setPeriodSeconds(10)
     livenessProbe.setFailureThreshold(6)
 
