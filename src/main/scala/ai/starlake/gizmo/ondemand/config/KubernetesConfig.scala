@@ -14,13 +14,8 @@ case class KubernetesConfig(
     imagePullSecrets: List[String],
     labels: Map[String, String],
     startupTimeoutSeconds: Int,
-    resourceRequestsCpu: String,
-    resourceRequestsMemory: String,
-    resourceLimitsCpu: String,
-    resourceLimitsMemory: String,
     healthCheckPort: Int,
-    healthCheckPath: String,
-    externalHost: Option[String]
+    healthCheckPath: String
 )
 
 object KubernetesConfig:
