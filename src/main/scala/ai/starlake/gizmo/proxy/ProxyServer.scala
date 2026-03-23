@@ -3,7 +3,7 @@ package ai.starlake.gizmo.proxy
 import ai.starlake.gizmo.proxy.config.ProxyConfig
 import ai.starlake.gizmo.proxy.flight.FlightSqlProxy
 import ai.starlake.gizmo.proxy.gizmoserver.GizmoServerManager
-import ai.starlake.gizmo.proxy.validation.StatementValidator
+import ai.starlake.gizmo.proxy.validation.{AclStatementValidator, StatementValidator}
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.arrow.flight.*
 import org.apache.arrow.memory.RootAllocator
@@ -26,54 +26,69 @@ object ProxyServer extends LazyLogging:
       s"Backend GizmoSQL server: ${config.backend.host}:${config.backend.port}"
     )
 
-    val validator = StatementValidator(config.validation)
+    val baseValidator = StatementValidator(config.validation)
+    val aclValidator: Option[AclStatementValidator] = if config.acl.enabled then
+      logger.info(s"ACL validation enabled (tenant=${config.session.aclTenant}, basePath=${config.acl.basePath})")
+      Some(new AclStatementValidator(config.acl, config.session))
+    else None
+    val validator = aclValidator match
+      case Some(acl) => StatementValidator.composite(baseValidator, acl)
+      case None      => baseValidator
     logger.info(
-      s"Statement validation enabled: ${config.validation.enabled}"
+      s"Statement validation enabled: ${config.validation.enabled}, ACL enabled: ${config.acl.enabled}"
     )
 
     // Generate INIT_SQL_COMMANDS logic
     val env = sys.env
 
-    // Build S3 secret SQL if AWS credentials are provided
-    val s3SecretSql = (env.get("AWS_KEY_ID"), env.get("AWS_SECRET"), env.get("AWS_REGION"), env.get("AWS_ENDPOINT")) match
-      case (Some(keyId), Some(secret), Some(region), Some(endpoint)) =>
-        val scopePart = "" //env.get("AWS_SCOPE").map(scope => s", SCOPE '$scope'").getOrElse("")
-        val noSchemeEndpoint =
-          if (endpoint.contains("://"))
-            endpoint.split("://").last
-          else
-            endpoint
-        val useSSL = if (endpoint.startsWith("https:")) "true" else "false"
-        val urlStyle = if (noSchemeEndpoint.contains("s3.amazonaws.com")) "vhost" else "path"
+    // Allow full override of INIT_SQL_COMMANDS via env var (for plain DuckDB, testing, etc.)
+    val initSqlCommands = env.get("INIT_SQL_OVERRIDE") match
+      case Some(override_sql) =>
+        logger.info("Using INIT_SQL_OVERRIDE (bypassing DuckLake template)")
+        override_sql
+      case None =>
+        // Build S3 secret SQL if AWS credentials are provided
+        val s3SecretSql = (env.get("AWS_KEY_ID"), env.get("AWS_SECRET"), env.get("AWS_REGION"), env.get("AWS_ENDPOINT")) match
+          case (Some(keyId), Some(secret), Some(region), Some(endpoint)) =>
+            val scopePart = "" //env.get("AWS_SCOPE").map(scope => s", SCOPE '$scope'").getOrElse("")
+            val noSchemeEndpoint =
+              if (endpoint.contains("://"))
+                endpoint.split("://").last
+              else
+                endpoint
+            val useSSL = if (endpoint.startsWith("https:")) "true" else "false"
+            val urlStyle = if (noSchemeEndpoint.contains("s3.amazonaws.com")) "vhost" else "path"
 
-        s"""CREATE OR REPLACE PERSISTENT SECRET s3_{{SL_DB_ID}}
-           |   (TYPE s3, KEY_ID '$keyId', SECRET '$secret', REGION '$region'$scopePart, ENDPOINT '$noSchemeEndpoint', USE_SSL '$useSSL', URL_STYLE '$urlStyle');""".stripMargin
-      case _ => ""
+            s"""CREATE OR REPLACE PERSISTENT SECRET s3_{{SL_DB_ID}}
+               |   (TYPE s3, KEY_ID '$keyId', SECRET '$secret', REGION '$region'$scopePart, ENDPOINT '$noSchemeEndpoint', USE_SSL '$useSSL', URL_STYLE '$urlStyle');""".stripMargin
+          case _ => ""
 
+        /**
+         * Build INIT_SQL_COMMANDS from template and environment variables
+         * - pg_??. contains the credentials to connect to the Postgres database
+         * - s3_{{SL_DB_ID}} contains the credentials to access the S3 bucket where the metadata is stored
+         * - {{SL_DB_ID}} contains the credentials to access the DuckDB database and references the Postgres database credentials
+         *    and the S3 bucket in the DATA_PATH parameter
+         */
+        val initSqlTemplate =
+          s"""
+            |install ducklake;
+            |load ducklake;
+            |CREATE OR REPLACE PERSISTENT SECRET pg_{{SL_DB_ID}}
+            |   (TYPE postgres, HOST '{{PG_HOST}}',PORT {{PG_PORT}}, DATABASE {{SL_DB_ID}}, USER '{{PG_USERNAME}}',PASSWORD '{{PG_PASSWORD}}');
+            |$s3SecretSql
+            |CREATE OR REPLACE PERSISTENT SECRET {{SL_DB_ID}}
+            |   (TYPE ducklake, METADATA_PATH '',DATA_PATH '{{SL_DATA_PATH}}', METADATA_PARAMETERS MAP {'TYPE': 'postgres', 'SECRET': 'pg_{{SL_DB_ID}}'});
+            |ATTACH IF NOT EXISTS 'ducklake:{{SL_DB_ID}}' AS {{SL_DB_ID}} (READ_ONLY);
+            |USE {{SL_DB_ID}};""".stripMargin
 
-    /**
-     * Build INIT_SQL_COMMANDS from template and environment variables
-     * - pg_??. contains the credentials to connect to the Postgres database
-     * - s3_{{SL_DB_ID}} contains the credentials to access the S3 bucket where the metadata is stored
-     * - {{SL_DB_ID}} contains the credentials to access the DuckDB database and references the Postgres database credentials
-     *    and the S3 bucket in the DATA_PATH parameter
-     */
-    val initSqlTemplate =
-      s"""CREATE OR REPLACE PERSISTENT SECRET pg_{{SL_DB_ID}}
-        |   (TYPE postgres, HOST '{{PG_HOST}}',PORT {{PG_PORT}}, DATABASE {{SL_DB_ID}}, USER '{{PG_USERNAME}}',PASSWORD '{{PG_PASSWORD}}');
-        |$s3SecretSql
-        |CREATE OR REPLACE PERSISTENT SECRET {{SL_DB_ID}}
-        |   (TYPE ducklake, METADATA_PATH '',DATA_PATH '{{SL_DATA_PATH}}', METADATA_PARAMETERS MAP {'TYPE': 'postgres', 'SECRET': 'pg_{{SL_DB_ID}}'});
-        |ATTACH IF NOT EXISTS 'ducklake:{{SL_DB_ID}}' AS {{SL_DB_ID}} (READ_ONLY);
-        |USE {{SL_DB_ID}};""".stripMargin
-
-    val initSqlCommands = initSqlTemplate
-      .replace("{{SL_DB_ID}}", env.getOrElse("SL_DB_ID", ""))
-      .replace("{{PG_HOST}}", env.getOrElse("PG_HOST", ""))
-      .replace("{{PG_PORT}}", env.getOrElse("PG_PORT", "5432"))
-      .replace("{{PG_USERNAME}}", env.getOrElse("PG_USERNAME", ""))
-      .replace("{{PG_PASSWORD}}", env.getOrElse("PG_PASSWORD", ""))
-      .replace("{{SL_DATA_PATH}}", env.getOrElse("SL_DATA_PATH", ""))
+        initSqlTemplate
+          .replace("{{SL_DB_ID}}", env.getOrElse("SL_DB_ID", ""))
+          .replace("{{PG_HOST}}", env.getOrElse("PG_HOST", ""))
+          .replace("{{PG_PORT}}", env.getOrElse("PG_PORT", "5432"))
+          .replace("{{PG_USERNAME}}", env.getOrElse("PG_USERNAME", ""))
+          .replace("{{PG_PASSWORD}}", env.getOrElse("PG_PASSWORD", ""))
+          .replace("{{SL_DATA_PATH}}", env.getOrElse("SL_DATA_PATH", ""))
 
     logger.info(s"INIT_SQL_COMMANDS for backend Gizmo server:\n$initSqlCommands")
     // Get idle timeout from EnvVars
@@ -87,21 +102,21 @@ object ProxyServer extends LazyLogging:
         val manager = GizmoServerManager(port, initSqlCommands, sys.env, idleTimeout)
         logger.info(s"Gizmo server port specified: $port")
         manager.start()
+        logger.info(s"Gizmo server started on port $port")
         manager
       case None =>
         logger.info(
           "No Gizmo server port specified, skipping Gizmo server startup"
         )
         null
-
     // Register shutdown hook to stop Gizmo server even on aggressive shutdown
-    if gizmoServerPort.isDefined && gizmoServerManager != null then
-      Runtime.getRuntime.addShutdownHook(
-        new Thread:
-          override def run(): Unit =
-            logger.info("Shutdown hook triggered - stopping Gizmo server")
-            gizmoServerManager.stop()
-      )
+    Runtime.getRuntime.addShutdownHook(
+      new Thread:
+        override def run(): Unit =
+          logger.info("Shutdown hook triggered")
+          if gizmoServerManager != null then gizmoServerManager.stop()
+          aclValidator.foreach(_.close())
+    )
 
     val allocator = new RootAllocator(Long.MaxValue)
 
@@ -192,5 +207,6 @@ object ProxyServer extends LazyLogging:
     if gizmoServerPort.isDefined && gizmoServerManager != null then
       gizmoServerManager.stop()
 
+    aclValidator.foreach(_.close())
     allocator.close()
     logger.info("GizmoSQL Proxy Server stopped")

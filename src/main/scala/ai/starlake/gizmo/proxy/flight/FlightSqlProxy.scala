@@ -12,10 +12,12 @@ import ai.starlake.gizmo.proxy.validation.{
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import com.auth0.jwt.interfaces.Claim
+import com.google.protobuf.Any as ProtobufAny
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.arrow.flight.*
 import org.apache.arrow.flight.auth.ServerAuthHandler
 import org.apache.arrow.flight.sql.NoOpFlightSqlProducer
+import org.apache.arrow.flight.sql.impl.FlightSql.{ActionCreatePreparedStatementRequest, CommandStatementQuery}
 import org.apache.arrow.memory.RootAllocator
 
 import java.nio.charset.StandardCharsets
@@ -115,41 +117,20 @@ class FlightSqlProxy(
     try
       val command = descriptor.getCommand
       if command != null && command.nonEmpty then
-        val commandStr = new String(command, 0, Math.min(100, command.length))
-
-        // Flight SQL metadata commands - forward without validation
-        if commandStr.contains("CommandGetTables") || commandStr.contains(
-            "CommandGetCatalogs"
-          ) ||
-          commandStr.contains("CommandGetSchemas") || commandStr.contains(
-            "CommandGetSqlInfo"
-          )
-        then return getBackendClient(context).getInfo(descriptor)
-
-        // SQL statements - validate if enabled
-        val fullCommandStr = new String(command)
-        val normalizedStatement = stripCommentsAndWhitespace(fullCommandStr)
-
-        if normalizedStatement.matches(
-            "(?i)^(WITH|SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|TRUNCATE|EXPLAIN|DESCRIBE|SHOW|SET|USE|GRANT|REVOKE|MERGE|COPY).*"
-          )
-        then
-          validator
-            .validate(
-              ValidationContext(
-                username = extractUsername(context),
-                database = "default",
-                statement = fullCommandStr,
-                peer = context.peerIdentity(),
-                claims = Option(FlightSqlProxy.currentClaims.get())
-                  .getOrElse(Map.empty)
-              )
-            ) match
-            case Denied(reason) =>
-              throw CallStatus.UNAUTHENTICATED
-                .withDescription(s"Statement execution denied: $reason")
-                .toRuntimeException()
-            case Allowed => // Continue
+        // Deserialize protobuf to extract the actual SQL statement
+        try
+          val any = ProtobufAny.parseFrom(command)
+          if any.is(classOf[CommandStatementQuery]) then
+            validateSql(context, any.unpack(classOf[CommandStatementQuery]).getQuery)
+          // else: Metadata command (CommandGetTables, CommandGetCatalogs, etc.) - no validation needed
+        catch
+          case e: FlightRuntimeException => throw e // Re-throw validation denials
+          case e: Exception =>
+            // Fail-closed: deny unparseable commands rather than skipping validation
+            logger.warn(s"Could not parse command as protobuf, denying by default: ${e.getMessage}")
+            throw CallStatus.UNAUTHENTICATED
+              .withDescription("Unable to parse command for validation — denied by default")
+              .toRuntimeException()
 
       getBackendClient(context).getInfo(descriptor)
     catch
@@ -206,12 +187,30 @@ class FlightSqlProxy(
   ): Unit =
     recordActivity()
     try
+      // Intercept CreatePreparedStatement to validate SQL before forwarding
+      if action.getType == "CreatePreparedStatement" then
+        val body = action.getBody
+        if body != null && body.nonEmpty then
+          try
+            val any = ProtobufAny.parseFrom(body)
+            if any.is(classOf[ActionCreatePreparedStatementRequest]) then
+              validateSql(context, any.unpack(classOf[ActionCreatePreparedStatementRequest]).getQuery)
+          catch
+            case e: FlightRuntimeException => throw e
+            case e: Exception =>
+              // Fail-closed: deny unparseable prepared statements
+              logger.warn(s"Could not parse CreatePreparedStatement body, denying by default: ${e.getMessage}")
+              throw CallStatus.UNAUTHENTICATED
+                .withDescription("Unable to parse prepared statement for validation — denied by default")
+                .toRuntimeException()
+
       getBackendClient(context)
         .doAction(action)
         .asScala
         .foreach(listener.onNext)
       listener.onCompleted()
     catch
+      case e: FlightRuntimeException => throw e // Propagate validation denials as gRPC status
       case e: Exception =>
         logger.error("Error in doAction", e)
         listener.onError(e)
@@ -226,6 +225,26 @@ class FlightSqlProxy(
       getBackendClient(context).getSchema(descriptor)
     finally
       onRequestComplete()
+
+  /** Validate a SQL statement against the configured validator.
+    * Throws FlightRuntimeException with UNAUTHENTICATED status if denied.
+    */
+  private def validateSql(context: FlightProducer.CallContext, sql: String): Unit =
+    logger.debug(s"Validating SQL: ${stripCommentsAndWhitespace(sql)}")
+    validator.validate(
+      ValidationContext(
+        username = extractUsername(context),
+        database = config.session.slProjectId,
+        statement = sql,
+        peer = context.peerIdentity(),
+        claims = Option(FlightSqlProxy.currentClaims.get()).getOrElse(Map.empty)
+      )
+    ) match
+      case Denied(reason) =>
+        throw CallStatus.UNAUTHENTICATED
+          .withDescription(s"Statement execution denied: $reason")
+          .toRuntimeException()
+      case Allowed => // Continue
 
   private def extractUsername(context: FlightProducer.CallContext): String =
     Option(context.peerIdentity()).filter(_.nonEmpty).getOrElse("unknown")
@@ -282,11 +301,16 @@ object FlightSqlProxy:
         outgoing: ServerAuthHandler.ServerAuthSender,
         incoming: java.util.Iterator[Array[Byte]]
     ): Boolean =
-      if !incoming.hasNext || incoming.next().isEmpty then
+      if !incoming.hasNext then
         outgoing.send(Array.emptyByteArray)
         return true
 
-      val handshakeRequest = new String(incoming.next(), StandardCharsets.UTF_8)
+      val firstToken = incoming.next()
+      if firstToken.isEmpty then
+        outgoing.send(Array.emptyByteArray)
+        return true
+
+      val handshakeRequest = new String(firstToken, StandardCharsets.UTF_8)
       try
         val parts = handshakeRequest.split("\u0000")
         if parts.length < 2 then
@@ -390,9 +414,16 @@ object FlightSqlProxy:
 
       try
         if authHeader.startsWith("Basic ") then
-          var Array(username, password) = new String(
+          val decoded = new String(
             java.util.Base64.getDecoder.decode(authHeader.substring(6))
-          ).split(":", 2)
+          )
+          val colonIndex = decoded.indexOf(':')
+          if colonIndex < 0 then
+            throw CallStatus.UNAUTHENTICATED
+              .withDescription("Malformed Basic credentials: missing ':'")
+              .toRuntimeException()
+          var username = decoded.substring(0, colonIndex)
+          var password = decoded.substring(colonIndex + 1)
 
           // Handle ODBC driver format: username};PWD={password (mimicking C++ GizmoSQL server)
           if username.contains("};PWD={") then

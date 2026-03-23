@@ -53,13 +53,30 @@ case class SessionConfig(
     pgPassword: String,
     pgPort: Int,
     pgHost: String,
-    jwtSecretKey: String
+    jwtSecretKey: String,
+    aclTenant: String
+) derives ConfigReader
+
+case class AclWatcherConfig(
+    enabled: Boolean,
+    debounceMs: Long,
+    maxBackoffMs: Long
+) derives ConfigReader
+
+case class AclConfig(
+    enabled: Boolean,
+    basePath: String,
+    dialect: String,
+    groupsClaim: String,
+    maxTenants: Int,
+    watcher: AclWatcherConfig
 ) derives ConfigReader
 
 case class GizmoSqlProxyConfig(
     proxy: ProxyServerConfig,
     backend: BackendConfig,
     validation: ValidationConfig,
+    acl: AclConfig,
     logging: LoggingConfig,
     session: SessionConfig
 ) derives ConfigReader

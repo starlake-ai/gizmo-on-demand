@@ -1,6 +1,6 @@
 package ai.starlake.gizmo.proxy.validation
 
-import ai.starlake.gizmo.proxy.config.ValidationConfig
+import ai.starlake.gizmo.proxy.config.{AclConfig, SessionConfig, ValidationConfig}
 
 import com.typesafe.scalalogging.LazyLogging
 
@@ -73,3 +73,9 @@ class DefaultStatementValidator(config: ValidationConfig)
 object StatementValidator:
   def apply(config: ValidationConfig): StatementValidator =
     new DefaultStatementValidator(config)
+
+  def acl(aclConfig: AclConfig, sessionConfig: SessionConfig): StatementValidator =
+    new AclStatementValidator(aclConfig, sessionConfig)
+
+  def composite(first: StatementValidator, second: StatementValidator): StatementValidator =
+    new CompositeStatementValidator(first, second)
