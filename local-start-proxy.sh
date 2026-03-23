@@ -93,17 +93,17 @@ export LOG_STATEMENTS="${LOG_STATEMENTS:-true}"
 export LOG_VALIDATION="${LOG_VALIDATION:-true}"
 
 export SL_DB_ID="${SL_DB_ID:-tpch2}"
-export PG_HOST="${PG_HOST:-localhost}"
+export PG_HOST="${PG_HOST:-host.docker.internal}"
 export PG_PORT=${PG_PORT:-5432}
-export PG_USERNAME="${PG_USERNAME:-postgres}"
-export PG_PASSWORD="${PG_PASSWORD:-azizam}"
-export SL_DATA_PATH="${SL_DATA_PATH:-/Users/hayssams/git/starlake-api/starlake-api-samples/100/177/ducklake_files/tpch2}"
+export PG_USERNAME="${PG_USERNAME:-ducklake}"
+export PG_PASSWORD="${PG_PASSWORD:-ducklake}"
+export SL_DATA_PATH="${SL_DATA_PATH:-/Users/tiboun/projects/starlake/gizmo-on-demand/gizmo_data}"
 
 export GIZMOSQL_USERNAME="${GIZMOSQL_USERNAME:-gizmosql_username}"
 export GIZMOSQL_PASSWORD="${GIZMOSQL_PASSWORD:-gizmosql_password}"
 export JWT_SECRET_KEY="${JWT_SECRET_KEY:-a_very_secret_key}"
 
-export SL_GIZMO_DEFAULT_SCRIPT="${SL_GIZMO_DEFAULT_SCRIPT:-/Users/hayssams/git/public/gizmo-on-demand/local-start-gizmo.sh}"
+export SL_GIZMO_DEFAULT_SCRIPT="${SL_GIZMO_DEFAULT_SCRIPT:-/Users/tiboun/projects/starlake/gizmo-on-demand/local-start-gizmo.sh}"
 
 echo "========================================="
 echo "  GizmoSQL Proxy Server"
@@ -143,5 +143,5 @@ if [ -f "$JAR_PATH" ]; then
     java $JAVA_OPTS $AGENT_LIB -cp "$JAR_PATH" ai.starlake.gizmo.proxy.ProxyServer
 else
     echo "Assembly JAR not found at $JAR_PATH. Running with sbt..."
-    sbt -J-Xmx2G -J--add-opens=java.base/java.nio=ALL-UNNAMED "runMain ai.starlake.gizmo.proxy.ProxyServer"
+    sbt -J-Xmx2G -J--add-opens=java.base/java.nio=ALL-UNNAMED -J-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 "runMain ai.starlake.gizmo.proxy.ProxyServer"
 fi

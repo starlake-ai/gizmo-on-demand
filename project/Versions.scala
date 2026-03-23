@@ -10,7 +10,9 @@ object Versions {
 
   val javaJwt = "4.4.0"
   val scalaTest = "3.2.17"
-  val jsqlParser = "5.4-SNAPSHOT"
+  val jsqlParser = "5.3.186"
   val jsqlTranspiler = "1.8-SNAPSHOT"
   val starlakeJdbc = "0.5-SNAPSHOT"
+  val circeYaml = "0.16.1"
+  val cats = "2.13.0"
 }

@@ -6,6 +6,7 @@ lazy val root = (project in file("."))
   .settings(
     name := "gizmo-on-demand",
     resolvers ++= Resolvers.allResolvers,
+    libraryDependencySchemes += "io.circe" %% "circe-yaml-common" % VersionScheme.Always,
     libraryDependencies ++= Seq(
       Dependencies.tapirCore,
       Dependencies.tapirJdkHttpServer,
@@ -50,7 +51,11 @@ lazy val root = (project in file("."))
       // JSQLParser
       Dependencies.jsqlParser,
       Dependencies.jsqlTranspiler,
-      Dependencies.starlakeJdbc
+      Dependencies.starlakeJdbc,
+
+      // ACL (from acl-sql)
+      Dependencies.circeYaml,
+      Dependencies.catsCore
     ),
     assembly / assemblyMergeStrategy := {
       case PathList("META-INF", "versions", "9", "module-info.class") =>

@@ -53,8 +53,15 @@ object Dependencies {
   // Testing
   val scalaTest = "org.scalatest" %% "scalatest" % Versions.scalaTest % Test
 
+  // YAML
+  val circeYaml = "io.circe" %% "circe-yaml-v12" % Versions.circeYaml
+
+  // Cats
+  val catsCore = "org.typelevel" %% "cats-core" % Versions.cats
+
   // JSQLParser
-  val jsqlParser = "com.github.jsqlparser" % "jsqlparser" % Versions.jsqlParser
+  // Source: https://mvnrepository.com/artifact/com.manticore-projects.jsqlformatter/jsqlparser
+  val jsqlParser = "com.manticore-projects.jsqlformatter" % "jsqlparser" % Versions.jsqlParser
   val jsqlTranspiler =
     "ai.starlake.jsqltranspiler" % "jsqltranspiler" % Versions.jsqlTranspiler
   val starlakeJdbc = "ai.starlake.jdbc" % "starlakejdbc" % Versions.starlakeJdbc
