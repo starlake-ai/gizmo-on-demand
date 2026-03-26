@@ -44,6 +44,12 @@ then
 fi
 
 
+# Health port: default 31338, set HEALTH_PORT=0 to disable
+HEALTH_PORT_ARG=""
+if [ -n "${HEALTH_PORT}" ]; then
+  HEALTH_PORT_ARG="--health-port ${HEALTH_PORT}"
+fi
+
 exec gizmosql_server \
   --backend="${L_DATABASE_BACKEND}" \
   --port="${L_PORT}" \
@@ -51,4 +57,5 @@ exec gizmosql_server \
   ${TLS_ARG} \
   ${PRINT_QUERIES_FLAG} \
   ${READONLY_FLAG} \
-  --query-timeout ${L_QUERY_TIMEOUT}
+  --query-timeout ${L_QUERY_TIMEOUT} \
+  ${HEALTH_PORT_ARG}
