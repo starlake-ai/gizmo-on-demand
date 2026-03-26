@@ -62,6 +62,7 @@ lazy val root = (project in file("."))
         xs match {
           case "MANIFEST.MF" :: Nil => MergeStrategy.discard
           case "services" :: _      => MergeStrategy.concat
+          case "vertx" :: _         => MergeStrategy.first
           case _                    => MergeStrategy.discard
         }
       case "module-info.class"       => MergeStrategy.discard
