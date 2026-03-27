@@ -6,6 +6,24 @@ lazy val root = (project in file("."))
   .settings(
     name := "gizmo-on-demand",
     resolvers ++= Resolvers.allResolvers,
+    // Force Netty version compatible with Arrow 14.0.1.
+    // Arrow's PooledByteBufAllocatorL accesses PoolArena.chunkSize via field inheritance
+    // from SizeClasses. In Netty 4.1.104+, PoolArena no longer extends SizeClasses,
+    // causing NoSuchFieldError at runtime. Fabric8 K8s client pulls Netty 4.1.117 via Vert.x.
+    // Long-term fix: upgrade Arrow to 17.0+ (apache/arrow#39266).
+    dependencyOverrides ++= Seq(
+      "io.netty" % "netty-buffer" % "4.1.96.Final",
+      "io.netty" % "netty-common" % "4.1.96.Final",
+      "io.netty" % "netty-handler" % "4.1.96.Final",
+      "io.netty" % "netty-transport" % "4.1.96.Final",
+      "io.netty" % "netty-codec" % "4.1.96.Final",
+      "io.netty" % "netty-codec-http" % "4.1.96.Final",
+      "io.netty" % "netty-codec-http2" % "4.1.96.Final",
+      "io.netty" % "netty-codec-socks" % "4.1.96.Final",
+      "io.netty" % "netty-handler-proxy" % "4.1.96.Final",
+      "io.netty" % "netty-resolver" % "4.1.96.Final",
+      "io.netty" % "netty-transport-native-unix-common" % "4.1.96.Final"
+    ),
     libraryDependencies ++= Seq(
       Dependencies.tapirCore,
       Dependencies.tapirJdkHttpServer,
