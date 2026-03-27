@@ -74,10 +74,29 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     container.setEnv(containerEnvVars)
     container.setPorts(java.util.List.of(proxyContainerPort, backendContainerPort))
 
+    // Mount shared PVC for DuckLake data files
+    config.volumeClaimName.foreach { pvcName =>
+      val volumeMount = new VolumeMount()
+      volumeMount.setName("projects")
+      volumeMount.setMountPath(config.volumeMountPath)
+      container.setVolumeMounts(java.util.List.of(volumeMount))
+    }
+
     // Pod spec
     val podSpec = new PodSpec()
     podSpec.setContainers(java.util.List.of(container))
     podSpec.setRestartPolicy("Never")
+
+    // Add PVC volume if configured
+    config.volumeClaimName.foreach { pvcName =>
+      val volume = new Volume()
+      volume.setName("projects")
+      val pvcSource = new PersistentVolumeClaimVolumeSource()
+      pvcSource.setClaimName(pvcName)
+      volume.setPersistentVolumeClaim(pvcSource)
+      podSpec.setVolumes(java.util.List.of(volume))
+    }
+
     config.serviceAccountName.foreach(sa => podSpec.setServiceAccountName(sa))
     if config.imagePullSecrets.nonEmpty then
       val secrets = config.imagePullSecrets.map { s =>
