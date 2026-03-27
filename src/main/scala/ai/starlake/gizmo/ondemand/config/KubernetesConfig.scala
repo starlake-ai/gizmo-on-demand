@@ -16,7 +16,13 @@ case class KubernetesConfig(
     startupTimeoutSeconds: Int,
     healthCheckPort: Int,
     healthCheckPath: String,
-    externalHost: Option[String]
+    resourceRequestsCpu: String,
+    resourceRequestsMemory: String,
+    resourceLimitsCpu: String,
+    resourceLimitsMemory: String,
+    externalHost: Option[String],
+    volumeClaimName: Option[String],
+    volumeMountPath: String
 )
 
 object KubernetesConfig:
