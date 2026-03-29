@@ -88,10 +88,10 @@ final case class AuthorizationOutcome(
 
       case Decision.Denied =>
         val deniedCount = result.deniedTables.size
-        val firstDenied = result.tableAccesses.find(_.decision == Decision.Denied)
-        val reasonDesc = firstDenied.flatMap(_.denyReason) match {
-          case Some(r) => formatDenyReason(r, firstDenied.map(_.table))
-          case None    => "unknown reason"
+        val deniedAccesses = result.tableAccesses.filter(_.decision == Decision.Denied)
+        val reasonDesc = deniedAccesses.flatMap(ta => ta.denyReason.map(r => formatDenyReason(r))) match {
+          case Nil    => "unknown reason"
+          case reasons => reasons.mkString(", ")
         }
         s"DENIED: $deniedCount of $tableCount tables denied ($reasonDesc)"
     }
@@ -140,7 +140,7 @@ final case class AuthorizationOutcome(
   /** JSON representation of the authorization outcome. */
   def toJson: Json = this.asJson(using AuthorizationOutcome.authorizationOutcomeEncoder)
 
-  private def formatDenyReason(r: model.DenyReason, @scala.annotation.unused table: Option[TableRef]): String = r match {
+  private def formatDenyReason(r: model.DenyReason): String = r match {
     case model.DenyReason.NoMatchingGrant(t, _)   => s"NoMatchingGrant on ${t.canonical}"
     case model.DenyReason.UnknownView(v)          => s"UnknownView: ${v.canonical}"
     case model.DenyReason.ViewResolutionCycle(c)  => s"ViewResolutionCycle: ${c.map(_.canonical).mkString(" -> ")}"

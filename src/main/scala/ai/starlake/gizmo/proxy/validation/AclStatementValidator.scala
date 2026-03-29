@@ -2,8 +2,8 @@ package ai.starlake.gizmo.proxy.validation
 
 import ai.starlake.acl.api.{AclSql, AclSqlConfig, SqlContext}
 import ai.starlake.acl.model.{TenantId, UserIdentity}
-import ai.starlake.acl.policy.ResourceLookupResult
 import ai.starlake.acl.watcher.{TenantListener, TenantWatcher, WatcherConfig}
+import ai.starlake.gizmo.proxy.catalog.DuckLakeCatalogResolver
 import ai.starlake.gizmo.proxy.config.{AclConfig, SessionConfig}
 import com.typesafe.scalalogging.LazyLogging
 
@@ -15,12 +15,13 @@ class AclStatementValidator(aclConfig: AclConfig, sessionConfig: SessionConfig)
       AutoCloseable,
       LazyLogging:
 
-  private val (aclSql, tenantWatcher) = initAclSql()
+  private val (aclSql, tenantWatcher, catalogResolver) = initAclSql()
 
-  private def initAclSql(): (AclSql, Option[TenantWatcher]) =
+  private def initAclSql(): (AclSql, Option[TenantWatcher], DuckLakeCatalogResolver) =
     val path = Paths.get(aclConfig.basePath)
-    val viewResolver: (TenantId, ai.starlake.acl.model.TableRef) => ResourceLookupResult =
-      (_, _) => ResourceLookupResult.BaseTable
+    val resolver = new DuckLakeCatalogResolver(sessionConfig)
+    val viewResolver = (tenant: TenantId, ref: ai.starlake.acl.model.TableRef) =>
+      resolver.resolve(tenant, ref)
     val aclSqlConfig = AclSqlConfig(maxTenants = Some(aclConfig.maxTenants))
     val api = new AclSql(path, viewResolver, aclSqlConfig)
 
@@ -40,16 +41,18 @@ class AclStatementValidator(aclConfig: AclConfig, sessionConfig: SessionConfig)
           api.invalidateTenant(tenantId)
       val watcher = new TenantWatcher(path, listener, watcherConfig)
       logger.info(s"ACL file watcher started on ${aclConfig.basePath} (debounce=${aclConfig.watcher.debounceMs}ms)")
-      (api, Some(watcher))
+      (api, Some(watcher), resolver)
     else
       logger.info("ACL file watcher disabled")
-      (api, None)
+      (api, None, resolver)
 
   override def close(): Unit =
     tenantWatcher.foreach { w =>
       logger.info("Stopping ACL file watcher")
       w.close()
     }
+    try catalogResolver.close()
+    catch case e: Exception => logger.warn(s"Error closing catalog resolver: ${e.getMessage}")
 
   override def validate(context: ValidationContext): ValidationResult =
     val tenantStr = sessionConfig.aclTenant

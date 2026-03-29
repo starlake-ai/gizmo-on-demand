@@ -228,6 +228,20 @@ Evaluation follows a short-circuit OR logic:
 
 A query touching multiple tables requires the user to have access to **ALL** referenced tables. If any single table is denied, the entire query is denied.
 
+### DuckDB Name Resolution
+
+When the ACL dialect is `duckdb`, two-part table names in SQL queries are resolved differently from standard SQL:
+
+| SQL name | DuckDB resolution | Standard SQL resolution |
+|----------|-------------------|------------------------|
+| `orders` | `{defaultDatabase}.main.orders` | `{defaultDatabase}.{defaultSchema}.orders` |
+| `tpch2.orders` | `tpch2.main.orders` (catalog-first) | `{defaultDatabase}.tpch2.orders` (schema-first) |
+| `tpch2.main.orders` | `tpch2.main.orders` | `tpch2.main.orders` |
+
+DuckDB interprets two-part names as `catalog.table` (not `schema.table`), using `main` as the default schema. This matches DuckDB's own behavior: *"When providing partial qualifications, DuckDB attempts to resolve the reference as either a catalog or a schema."*
+
+**Recommendation:** Always use fully qualified three-part names (`database.schema.table`) in both SQL queries and grant targets to avoid ambiguity.
+
 ## Principals
 
 Principals identify who receives a grant:

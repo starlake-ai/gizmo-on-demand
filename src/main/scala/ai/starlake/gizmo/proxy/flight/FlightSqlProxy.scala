@@ -86,9 +86,12 @@ class FlightSqlProxy(
       while stream.next() do listener.putNext()
       listener.completed()
     catch
+      case e: FlightRuntimeException if e.status().code() == FlightStatusCode.CANCELLED =>
+        logger.debug("Client cancelled stream", e)
       case e: Exception =>
         logger.error("Error in getStream", e)
-        listener.error(e)
+        try listener.error(e)
+        catch case _: Exception => () // listener already closed
     finally onRequestComplete()
 
   override def listFlights(

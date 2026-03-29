@@ -65,4 +65,7 @@ object Dependencies {
   val jsqlTranspiler =
     "ai.starlake.jsqltranspiler" % "jsqltranspiler" % Versions.jsqlTranspiler
   val starlakeJdbc = "ai.starlake.jdbc" % "starlakejdbc" % Versions.starlakeJdbc
+
+  // DuckDB JDBC
+  val duckdbJdbc = "org.duckdb" % "duckdb_jdbc" % Versions.duckdb
 }

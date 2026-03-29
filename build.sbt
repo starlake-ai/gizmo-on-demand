@@ -53,6 +53,9 @@ lazy val root = (project in file("."))
       Dependencies.jsqlTranspiler,
       Dependencies.starlakeJdbc,
 
+      // DuckDB JDBC (for catalog resolver)
+      Dependencies.duckdbJdbc,
+
       // ACL (from acl-sql)
       Dependencies.circeYaml,
       Dependencies.catsCore

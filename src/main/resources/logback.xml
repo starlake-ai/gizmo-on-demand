@@ -20,6 +20,8 @@
     <logger name="com.gizmodata.gizmosql.proxy" level="INFO"/>
     <logger name="org.apache.arrow" level="WARN"/>
     <logger name="io.grpc" level="WARN"/>
+    <!-- Suppress Netty HTTP/2 stream closure warnings (client-initiated cancellations) -->
+    <logger name="io.grpc.netty.NettyServerHandler" level="ERROR"/>
 
     <root level="INFO">
         <appender-ref ref="STDOUT"/>

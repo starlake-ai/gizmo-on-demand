@@ -77,13 +77,41 @@ class DialectMapperTest extends AnyFunSuite with Matchers {
     result.toOption.get.table shouldBe "orders"
   }
 
-  test("DuckDB mapper delegates to ANSI mapper") {
+  test("DuckDB mapper delegates to ANSI for three-part names") {
     val config = Config.forDuckDB("defaultdb", "defaultschema")
     val table  = makeTable("orders", schema = "public", database = "mydb")
     val ansiResult   = DialectMapper.ansi.toTableRef(table, config)
     val duckdbResult = DialectMapper.duckdb.toTableRef(table, config)
-    // Both should resolve to same TableRef
     ansiResult.toOption.get shouldEqual duckdbResult.toOption.get
+  }
+
+  test("DuckDB mapper treats two-part name as catalog.table (not schema.table)") {
+    val config = Config.forDuckDB("defaultdb", "main")
+    val table  = makeTable("orders", schema = "sales") // JSqlParser: schema=sales
+    val duckdbResult = DialectMapper.duckdb.toTableRef(table, config)
+    // DuckDB: sales is the catalog, main is the default schema
+    duckdbResult shouldBe Right(TableRef("sales", "main", "orders"))
+  }
+
+  test("DuckDB mapper uses config defaultSchema for two-part names") {
+    val config = Config.forDuckDB("defaultdb", "public")
+    val table  = makeTable("orders", schema = "mycat")
+    val duckdbResult = DialectMapper.duckdb.toTableRef(table, config)
+    duckdbResult shouldBe Right(TableRef("mycat", "public", "orders"))
+  }
+
+  test("DuckDB mapper falls back to 'main' when no defaultSchema configured") {
+    val config = Config.forDuckDB(defaultDatabase = Some("defaultdb"))
+    val table  = makeTable("orders", schema = "mycat")
+    val duckdbResult = DialectMapper.duckdb.toTableRef(table, config)
+    duckdbResult shouldBe Right(TableRef("mycat", "main", "orders"))
+  }
+
+  test("DuckDB mapper delegates to ANSI for one-part names") {
+    val config = Config.forDuckDB("defaultdb", "main")
+    val table  = makeTable("orders")
+    val duckdbResult = DialectMapper.duckdb.toTableRef(table, config)
+    duckdbResult shouldBe Right(TableRef("defaultdb", "main", "orders"))
   }
 
   test("DuckDB isFileReference detects string-literal file references") {

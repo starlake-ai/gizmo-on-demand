@@ -20,10 +20,40 @@ class SqlParserDuckDBTest extends AnyFunSuite with Matchers {
     result.allTables shouldBe Set(TableRef("mydb", "main", "orders"))
   }
 
-  test("apply DuckDB defaults for two-part schema.table") {
+  test("two-part name is resolved as catalog.table with default schema (DuckDB convention)") {
     val sql = "SELECT * FROM sales.orders"
     val result = SqlParser.extract(sql, config)
-    result.allTables shouldBe Set(TableRef("mydb", "sales", "orders"))
+    // DuckDB interprets two-part names as catalog.table (not schema.table like ANSI SQL),
+    // using the default schema ("main") for the missing schema part
+    result.allTables shouldBe Set(TableRef("sales", "main", "orders"))
+  }
+
+  test("two-part name with defaultSchema override uses that schema") {
+    val configWithSchema = Config.forDuckDB("mydb", "public")
+    val sql = "SELECT * FROM sales.orders"
+    val result = SqlParser.extract(sql, configWithSchema)
+    // Two-part: catalog=sales, schema=public (from config), table=orders
+    result.allTables shouldBe Set(TableRef("sales", "public", "orders"))
+  }
+
+  test("two-part name resolves correctly for DuckLake database") {
+    val tpchConfig = Config.forDuckDB("tpch2", "main")
+    val sql = "SELECT * FROM tpch2.revenue_per_nation"
+    val result = SqlParser.extract(sql, tpchConfig)
+    // DuckDB: tpch2 is the catalog, main is the default schema
+    result.allTables shouldBe Set(TableRef("tpch2", "main", "revenue_per_nation"))
+  }
+
+  test("three-part name is unchanged by DuckDB mapper") {
+    val sql = "SELECT * FROM mycat.myschema.mytable"
+    val result = SqlParser.extract(sql, config)
+    result.allTables shouldBe Set(TableRef("mycat", "myschema", "mytable"))
+  }
+
+  test("one-part name uses both defaults") {
+    val sql = "SELECT * FROM orders"
+    val result = SqlParser.extract(sql, config)
+    result.allTables shouldBe Set(TableRef("mydb", "main", "orders"))
   }
 
   test("ignore DuckDB file reference") {

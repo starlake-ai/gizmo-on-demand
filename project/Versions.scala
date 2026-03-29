@@ -15,4 +15,5 @@ object Versions {
   val starlakeJdbc = "0.5-SNAPSHOT"
   val circeYaml = "0.16.1"
   val cats = "2.13.0"
+  val duckdb = "1.4.3.0"
 }
