@@ -4,46 +4,32 @@ import ai.starlake.acl.{AclError, AuthorizationOutcome, Timing, TraceInfo}
 import ai.starlake.acl.model.*
 import ai.starlake.acl.parser.{SqlParser, StatementResult}
 import ai.starlake.acl.policy.{AclEvaluator, ResourceLookupResult}
+import ai.starlake.acl.store.{AclStore, LocalAclStore}
 
 import java.nio.file.Path
 import java.time.Instant
 
 /** Tenant-aware SQL authorization API.
   *
-  * Replaces DatabaseAccessControl for v1.1 multi-tenancy. Each tenant has
-  * isolated ACL definitions loaded from basePath/{tenantId}/ folders. Grants
+  * Each tenant has isolated ACL definitions loaded from an AclStore. Grants
   * are cached per-tenant with optional LRU eviction.
   *
-  * @param basePath
-  *   Base directory containing tenant folders
+  * @param store
+  *   Storage backend for reading ACL files
   * @param viewResolver
   *   Callback that classifies table references per tenant
   * @param config
   *   API configuration (caching, SQL defaults)
   */
 final class AclSql(
-    val basePath: Path,
+    val store: AclStore,
     val viewResolver: (TenantId, TableRef) => ResourceLookupResult,
     val config: AclSqlConfig = AclSqlConfig.default
 ):
 
-  private val cache = new TenantCache(config.maxTenants)
+  private val cache = new TenantCache(store, config.maxTenants)
 
-  /** Check access for a SQL statement.
-    *
-    * @param tenant
-    *   Tenant identifier (required)
-    * @param sql
-    *   SQL query to authorize
-    * @param user
-    *   User identity to check
-    * @param trace
-    *   Include trace information in result
-    * @param sqlContext
-    *   SQL context (database, schema, dialect) for this call
-    * @return
-    *   Authorization outcome (never throws)
-    */
+  /** Check access for a SQL statement. */
   def checkAccess(
       tenant: TenantId,
       sql: String,
@@ -55,11 +41,7 @@ final class AclSql(
       Left(AclError.InternalError("No statements found in SQL input"))
     )
 
-  /** String overload for tenant parameter.
-    *
-    * Note: `trace` and `sqlContext` have no defaults on this overload to avoid
-    * Scala overload resolution ambiguity with the TenantId overload.
-    */
+  /** String overload for tenant parameter. */
   def checkAccess(
       tenant: String,
       sql: String,
@@ -72,21 +54,7 @@ final class AclSql(
       case Left(err) =>
         Left(AclError.ConfigError(s"Invalid tenant ID: $err"))
 
-  /** Check access for multiple SQL statements.
-    *
-    * @param tenant
-    *   Tenant identifier (required)
-    * @param sql
-    *   SQL string (may contain multiple statements)
-    * @param user
-    *   User identity to check
-    * @param trace
-    *   Include trace information in results
-    * @param sqlContext
-    *   SQL context (database, schema, dialect) for this call
-    * @return
-    *   List of authorization outcomes, one per statement
-    */
+  /** Check access for multiple SQL statements. */
   def checkAccessAll(
       tenant: TenantId,
       sql: String,
@@ -100,7 +68,7 @@ final class AclSql(
       case _        => Config.forGeneric(sqlContext.defaultDatabase, sqlContext.defaultSchema)
 
     // Load grants from cache
-    val (policyResult, usedStale) = cache.getOrLoad(tenant, basePath)
+    val (policyResult, usedStale) = cache.getOrLoad(tenant)
 
     val now = sqlContext.now.getOrElse(Instant.now())
 
@@ -285,35 +253,27 @@ final class AclSql(
 
 object AclSql:
 
-  /** Create an AclSql instance with defaults.
+  /** Create an AclSql instance with defaults using an AclStore. */
+  def apply(
+      store: AclStore,
+      viewResolver: (TenantId, TableRef) => ResourceLookupResult
+  ): AclSql = new AclSql(store, viewResolver, AclSqlConfig.default)
+
+  /** Create an AclSql instance with defaults using a local filesystem path.
     *
-    * @param basePath
-    *   Base directory containing tenant folders
-    * @param viewResolver
-    *   Callback that classifies table references per tenant
+    * @deprecated Use apply(store, viewResolver) instead
     */
+  @deprecated("Use apply(store, viewResolver) instead", "2.0")
   def apply(
       basePath: Path,
       viewResolver: (TenantId, TableRef) => ResourceLookupResult
-  ): AclSql = new AclSql(basePath, viewResolver, AclSqlConfig.default)
+  ): AclSql = new AclSql(new LocalAclStore(basePath), viewResolver, AclSqlConfig.default)
 
   /** Create AclSql with an attached TenantWatcher for automatic cache invalidation.
     *
-    * The watcher monitors basePath for file changes and invalidates the
-    * corresponding tenant's cache. Returns both the API and watcher so the
-    * caller can manage the watcher lifecycle.
-    *
-    * @param basePath
-    *   Base directory containing tenant folders
-    * @param viewResolver
-    *   Callback that classifies table references per tenant
-    * @param config
-    *   API configuration
-    * @param watcherConfig
-    *   Watcher configuration
-    * @return
-    *   Tuple of (AclSql, TenantWatcher) - caller must close watcher when done
+    * @deprecated Use AclStoreFactory for cloud-aware store + detector creation
     */
+  @deprecated("Use AclStoreFactory for cloud-aware store + detector creation", "2.0")
   def withWatcher(
       basePath: Path,
       viewResolver: (TenantId, TableRef) => ResourceLookupResult,
@@ -321,7 +281,8 @@ object AclSql:
       watcherConfig: ai.starlake.acl.watcher.WatcherConfig =
         ai.starlake.acl.watcher.WatcherConfig.default
   ): (AclSql, ai.starlake.acl.watcher.TenantWatcher) =
-    val api = new AclSql(basePath, viewResolver, config)
+    val store = new LocalAclStore(basePath)
+    val api = new AclSql(store, viewResolver, config)
 
     val listener = new ai.starlake.acl.watcher.TenantListener:
       override def onInvalidate(tenantId: TenantId): Unit =

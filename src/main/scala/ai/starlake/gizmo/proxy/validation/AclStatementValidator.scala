@@ -2,12 +2,12 @@ package ai.starlake.gizmo.proxy.validation
 
 import ai.starlake.acl.api.{AclSql, AclSqlConfig, SqlContext}
 import ai.starlake.acl.model.{TenantId, UserIdentity}
-import ai.starlake.acl.watcher.{TenantListener, TenantWatcher, WatcherConfig}
+import ai.starlake.acl.store.{AclChangeDetector, AclStore, AclStoreFactory}
+import ai.starlake.acl.watcher.TenantListener
 import ai.starlake.gizmo.proxy.catalog.DuckLakeCatalogResolver
 import ai.starlake.gizmo.proxy.config.{AclConfig, SessionConfig}
 import com.typesafe.scalalogging.LazyLogging
 
-import java.nio.file.Paths
 import scala.jdk.CollectionConverters.*
 
 class AclStatementValidator(aclConfig: AclConfig, sessionConfig: SessionConfig)
@@ -15,21 +15,17 @@ class AclStatementValidator(aclConfig: AclConfig, sessionConfig: SessionConfig)
       AutoCloseable,
       LazyLogging:
 
-  private val (aclSql, tenantWatcher, catalogResolver) = initAclSql()
+  private val (aclSql, changeDetector, store, catalogResolver) = initAclSql()
 
-  private def initAclSql(): (AclSql, Option[TenantWatcher], DuckLakeCatalogResolver) =
-    val path = Paths.get(aclConfig.basePath)
+  private def initAclSql(): (AclSql, Option[AclChangeDetector], AclStore, DuckLakeCatalogResolver) =
+    val (aclStore, detector) = AclStoreFactory.create(aclConfig)
     val resolver = new DuckLakeCatalogResolver(sessionConfig)
     val viewResolver = (tenant: TenantId, ref: ai.starlake.acl.model.TableRef) =>
       resolver.resolve(tenant, ref)
     val aclSqlConfig = AclSqlConfig(maxTenants = Some(aclConfig.maxTenants))
-    val api = new AclSql(path, viewResolver, aclSqlConfig)
+    val api = new AclSql(aclStore, viewResolver, aclSqlConfig)
 
     if aclConfig.watcher.enabled then
-      val watcherConfig = WatcherConfig(
-        debounceMs = aclConfig.watcher.debounceMs,
-        maxBackoffMs = aclConfig.watcher.maxBackoffMs
-      )
       val listener = new TenantListener:
         override def onInvalidate(tenantId: TenantId): Unit =
           logger.info(s"ACL grants reloaded for tenant: $tenantId")
@@ -39,18 +35,21 @@ class AclStatementValidator(aclConfig: AclConfig, sessionConfig: SessionConfig)
         override def onTenantDeleted(tenantId: TenantId): Unit =
           logger.warn(s"ACL tenant deleted: $tenantId")
           api.invalidateTenant(tenantId)
-      val watcher = new TenantWatcher(path, listener, watcherConfig)
-      logger.info(s"ACL file watcher started on ${aclConfig.basePath} (debounce=${aclConfig.watcher.debounceMs}ms)")
-      (api, Some(watcher), resolver)
+      detector.start(listener)
+      logger.info(s"ACL change detector started for ${aclConfig.basePath}")
+      (api, Some(detector), aclStore, resolver)
     else
-      logger.info("ACL file watcher disabled")
-      (api, None, resolver)
+      logger.info("ACL change detection disabled")
+      detector.close()
+      (api, None, aclStore, resolver)
 
   override def close(): Unit =
-    tenantWatcher.foreach { w =>
-      logger.info("Stopping ACL file watcher")
-      w.close()
+    changeDetector.foreach { d =>
+      logger.info("Stopping ACL change detector")
+      d.close()
     }
+    try store.close()
+    catch case e: Exception => logger.warn(s"Error closing ACL store: ${e.getMessage}")
     try catalogResolver.close()
     catch case e: Exception => logger.warn(s"Error closing catalog resolver: ${e.getMessage}")
 

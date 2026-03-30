@@ -3,7 +3,7 @@ object Versions {
   val http4s = "0.23.24"
   val circe = "0.14.10"
   val arrow = "14.0.1"
-  val grpc = "1.59.0"
+  val grpc = "1.76.3"
   val scalaLogging = "3.9.5"
   val logbackClassic = "1.5.12"
   val pureconfig = "0.17.8"
@@ -16,4 +16,6 @@ object Versions {
   val circeYaml = "0.16.1"
   val cats = "2.13.0"
   val duckdb = "1.4.3.0"
+  val blobstore = "0.10.1"
+  val netty = "4.1.97.Final"
 }

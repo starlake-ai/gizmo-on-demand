@@ -56,6 +56,9 @@ object AclError:
   case class InvalidExpires(value: String, grantIndex: Int) extends AclError:
     def message: String = s"Invalid expires '$value' at grant #${grantIndex + 1}: must be ISO-8601 Instant (e.g., 2025-12-31T23:59:59Z)"
 
+  case class StoreError(detail: String, cause: Option[Throwable] = None) extends AclError:
+    def message: String = s"Store error: $detail"
+
   // ---------------------------------------------------------------------------
   // JSON serialization (MODEL-002 pattern: manual Encoder)
   // ---------------------------------------------------------------------------
@@ -150,5 +153,11 @@ object AclError:
         "detail"     -> e.message.asJson,
         "value"      -> e.value.asJson,
         "grantIndex" -> e.grantIndex.asJson
+      )
+
+    case e: StoreError =>
+      Json.obj(
+        "type"   -> "storeError".asJson,
+        "detail" -> e.message.asJson
       )
   }

@@ -3,6 +3,7 @@ package ai.starlake.acl.api
 import ai.starlake.acl.AclError
 import ai.starlake.acl.model.*
 import ai.starlake.acl.policy.ResourceLookupResult
+import ai.starlake.acl.store.LocalAclStore
 import ai.starlake.acl.watcher.{WatcherConfig, WatcherStatus}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.funsuite.AnyFunSuite
@@ -51,7 +52,7 @@ class AclSqlIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfte
         |""".stripMargin
     )
 
-    val api = new AclSql(tempDir, simpleViewResolver)
+    val api = new AclSql(new LocalAclStore(tempDir), simpleViewResolver)
     val alice = testUser("alice")
     val bob = testUser("bob")
 
@@ -86,7 +87,7 @@ class AclSqlIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfte
   test("checkAccess returns TenantNotFound error for unknown tenant"):
     // No tenant folders created
 
-    val api = new AclSql(tempDir, simpleViewResolver)
+    val api = new AclSql(new LocalAclStore(tempDir), simpleViewResolver)
     val user = testUser("alice")
 
     val result = api.checkAccess(
@@ -113,7 +114,7 @@ class AclSqlIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfte
         |""".stripMargin
     )
 
-    val api = new AclSql(tempDir, simpleViewResolver)
+    val api = new AclSql(new LocalAclStore(tempDir), simpleViewResolver)
 
     val result =
       api.checkAccess("mycompany", "SELECT * FROM db.schema.t", testUser("anyone"), false, SqlContext.default)
@@ -121,7 +122,7 @@ class AclSqlIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfte
     result.toOption.get.isAllowed shouldBe true
 
   test("checkAccess with invalid String tenant returns error"):
-    val api = new AclSql(tempDir, simpleViewResolver)
+    val api = new AclSql(new LocalAclStore(tempDir), simpleViewResolver)
 
     val result = api.checkAccess("", "SELECT * FROM t", testUser("alice"), false, SqlContext.default)
     result.isLeft shouldBe true
@@ -151,7 +152,7 @@ class AclSqlIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfte
         |""".stripMargin
     )
 
-    val api = new AclSql(tempDir, tenantAwareResolver)
+    val api = new AclSql(new LocalAclStore(tempDir), tenantAwareResolver)
     val tenant = TenantId.parse("viewtest").toOption.get
 
     val result = api.checkAccess(tenant, "SELECT * FROM db.schema.my_view", testUser("alice"))
@@ -199,7 +200,7 @@ class AclSqlIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfte
         |""".stripMargin
     )
 
-    val api = new AclSql(tempDir, viewResolver)
+    val api = new AclSql(new LocalAclStore(tempDir), viewResolver)
     val alice = testUser("alice")
 
     // In tenant-a, view resolves to table_a (which alice can access)
@@ -237,7 +238,7 @@ class AclSqlIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfte
            |""".stripMargin
       )
 
-    val api = new AclSql(tempDir, simpleViewResolver)
+    val api = new AclSql(new LocalAclStore(tempDir), simpleViewResolver)
 
     for i <- 1 to 3 do
       val tenant = TenantId.parse(s"tenant-$i").toOption.get
@@ -251,7 +252,7 @@ class AclSqlIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfte
     Files.createDirectory(tenantDir)
     // Empty folder = valid tenant with no grants (deny-all)
 
-    val api = new AclSql(tempDir, simpleViewResolver)
+    val api = new AclSql(new LocalAclStore(tempDir), simpleViewResolver)
     val tenant = TenantId.parse("status-test").toOption.get
 
     // Before access
@@ -271,7 +272,7 @@ class AclSqlIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfte
       Files.createDirectory(dir)
       // Empty folders = valid tenants with no grants
 
-    val api = new AclSql(tempDir, simpleViewResolver)
+    val api = new AclSql(new LocalAclStore(tempDir), simpleViewResolver)
 
     // Access all tenants
     for i <- 1 to 3 do
@@ -355,7 +356,7 @@ class AclSqlIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfte
     Files.createDirectory(tenantDir)
     // Empty folder = valid tenant with deny-all
 
-    val api = new AclSql(tempDir, simpleViewResolver)
+    val api = new AclSql(new LocalAclStore(tempDir), simpleViewResolver)
     val tenant = TenantId.parse("fieldtest").toOption.get
 
     val result = api.checkAccess(tenant, "SELECT * FROM db.schema.t", testUser("alice"))
@@ -367,7 +368,7 @@ class AclSqlIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfte
     Files.createDirectory(tenantDir)
     // Empty folder = valid tenant with deny-all
 
-    val api = new AclSql(tempDir, simpleViewResolver)
+    val api = new AclSql(new LocalAclStore(tempDir), simpleViewResolver)
     val tenant = TenantId.parse("staletest").toOption.get
 
     val result = api.checkAccess(tenant, "SELECT * FROM db.schema.t", testUser("alice"))

@@ -57,6 +57,55 @@ Client                    Proxy                         Backend
 5. If allowed: the query is forwarded to the GizmoSQL backend.
 6. If denied: an error is returned to the client with the denial reason (CallStatus.UNAUTHENTICATED).
 
+## ACL Storage
+
+### Storage Backends
+
+ACL grant files can be stored on different backends. The backend is **automatically inferred** from the `ACL_BASE_PATH` URI prefix:
+
+| `ACL_BASE_PATH` prefix | Backend | Change detection |
+|---|---|---|
+| `/local/path` | Local filesystem | Java WatchService (instant) |
+| `s3://bucket/path` | AWS S3 | Polling (configurable interval) |
+| `gs://bucket/path` | Google Cloud Storage | Polling (configurable interval) |
+| `az://container/path` | Azure Blob Storage | Polling (configurable interval) |
+
+No additional configuration field is required — just change `ACL_BASE_PATH` to switch backends.
+
+#### Cloud Backend Authentication
+
+For cloud backends, credentials are resolved in this order:
+
+1. **Explicit** — provider-specific configuration (if set)
+2. **Automatic** — default credential chain of each provider
+
+| Backend | Explicit config | Automatic fallback |
+|---|---|---|
+| S3 | `ACL_S3_REGION`, `ACL_S3_CREDENTIALS_FILE` | [Default Credential Chain](https://docs.aws.amazon.com/sdk-for-java/latest/developer-guide/credentials-chain.html) (env vars, instance profile, etc.) |
+| GCS | `ACL_GCS_PROJECT_ID`, `ACL_GCS_SERVICE_ACCOUNT_KEY_FILE` | [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials) (ADC) |
+| Azure | `ACL_AZURE_CONNECTION_STRING` | [DefaultAzureCredential](https://learn.microsoft.com/en-us/java/api/overview/azure/identity-readme#defaultazurecredential) (managed identity, env vars) |
+
+All explicit fields are optional (`Option[String]`). When absent, the automatic fallback is used.
+
+#### Examples
+
+```bash
+# Local filesystem (default)
+export ACL_BASE_PATH=/etc/gizmosql/acl
+
+# AWS S3
+export ACL_BASE_PATH=s3://my-acl-bucket/tenants
+export ACL_S3_REGION=eu-west-1  # optional
+
+# Google Cloud Storage
+export ACL_BASE_PATH=gs://my-acl-bucket/tenants
+export ACL_GCS_PROJECT_ID=my-project  # optional
+
+# Azure Blob Storage
+export ACL_BASE_PATH=az://my-acl-container/tenants
+export ACL_AZURE_CONNECTION_STRING="DefaultEndpointsProtocol=..."  # optional
+```
+
 ## Tenant Directory Structure
 
 ```
@@ -75,6 +124,7 @@ Client                    Proxy                         Backend
 - Tenant IDs must match `[a-zA-Z0-9_-]+`.
 - An unknown tenant (missing folder) returns a `TenantNotFound` error.
 - An empty folder is a valid tenant where all queries are denied.
+- The same directory structure applies whether using local filesystem or cloud storage.
 
 ## Grant File Organization & Merge Strategy
 
@@ -470,30 +520,49 @@ All identifiers (usernames, group names, database names, schema names, table nam
 | Variable | Default | Description |
 |---|---|---|
 | `ACL_ENABLED` | `true` | Enable/disable ACL validation |
-| `ACL_BASE_PATH` | `/etc/gizmosql/acl` | Base directory for tenant grant folders |
+| `ACL_BASE_PATH` | `/etc/gizmosql/acl` | Base path for tenant grant folders. Supports `s3://`, `gs://`, `az://` prefixes for cloud storage |
 | `ACL_TENANT` | `default` | Active tenant identifier |
 | `ACL_DIALECT` | `duckdb` | SQL dialect for parsing (`duckdb` or `ansi`) |
 | `ACL_GROUPS_CLAIM` | `groups` | JWT claim name for user groups |
 | `ACL_MAX_TENANTS` | `100` | Max cached tenant policies |
-| `ACL_WATCHER_ENABLED` | `true` | Enable file watcher for auto-reload |
-| `ACL_WATCHER_DEBOUNCE_MS` | `500` | Debounce delay before reload (ms) |
-| `ACL_WATCHER_MAX_BACKOFF_MS` | `60000` | Max retry backoff (ms) |
+| `ACL_WATCHER_ENABLED` | `true` | Enable change detection for auto-reload |
+| `ACL_WATCHER_DEBOUNCE_MS` | `500` | Debounce delay before reload — local filesystem only (ms) |
+| `ACL_WATCHER_MAX_BACKOFF_MS` | `60000` | Max retry backoff — local filesystem only (ms) |
+| `ACL_WATCHER_POLL_INTERVAL_MS` | `30000` | Polling interval — cloud backends only (ms) |
+| `ACL_S3_REGION` | _(none)_ | AWS S3 region (optional, auto-detected if absent) |
+| `ACL_S3_CREDENTIALS_FILE` | _(none)_ | Path to AWS credentials file (optional, uses default chain if absent) |
+| `ACL_GCS_PROJECT_ID` | _(none)_ | GCP project ID (optional, auto-detected if absent) |
+| `ACL_GCS_SERVICE_ACCOUNT_KEY_FILE` | _(none)_ | Path to GCP service account JSON key (optional, uses ADC if absent) |
+| `ACL_AZURE_CONNECTION_STRING` | _(none)_ | Azure connection string (optional, uses DefaultAzureCredential if absent) |
 
 See [Configuration Reference](configuration.md) for complete details.
 
-## File Watcher
+## Change Detection
 
-When [`ACL_WATCHER_ENABLED`](configuration.md#acl-access-control-lists)`=true` (default), the proxy monitors the ACL base directory for changes. When a grant file is added, modified, or deleted:
+When [`ACL_WATCHER_ENABLED`](configuration.md#acl-access-control-lists)`=true` (default), the proxy monitors the ACL storage for changes. The detection mechanism adapts to the storage backend:
 
-1. The watcher detects the change.
+### Local Filesystem
+
+Uses Java's `WatchService` for near-instant detection:
+
+1. The watcher detects file creation, modification, or deletion.
 2. After the debounce delay ([`ACL_WATCHER_DEBOUNCE_MS`](configuration.md#acl-access-control-lists)), the affected tenant's cache is invalidated.
-3. The next query triggers a reload of the tenant's grants from disk.
+3. The next query triggers a reload of the tenant's grants.
 
-This allows you to update ACL policies without restarting the proxy.
+### Cloud Storage (S3, GCS, Azure)
+
+Uses periodic polling since cloud providers don't support push-based file watching:
+
+1. Every [`ACL_WATCHER_POLL_INTERVAL_MS`](configuration.md#acl-access-control-lists) (default: 30 seconds), the detector lists tenants and their files.
+2. Changes are detected by comparing file names and last-modified timestamps with the previous state.
+3. Detected changes invalidate the affected tenant's cache.
+
+This allows you to update ACL policies without restarting the proxy, regardless of the storage backend.
 
 **Limitations:**
-- Network file systems (NFS, CIFS) may not support file watching — use manual cache invalidation or restart the proxy.
-- Very rapid changes may be batched into a single reload due to debouncing.
+- **Local filesystem**: Network file systems (NFS, CIFS) may not support `WatchService` — consider using cloud storage or restarting the proxy.
+- **Cloud storage**: Changes are detected with a latency of up to `ACL_WATCHER_POLL_INTERVAL_MS`. Reduce the interval for faster detection (at the cost of more API calls).
+- Very rapid changes may be batched into a single reload due to debouncing (local) or polling interval (cloud).
 
 ## Complete Examples
 

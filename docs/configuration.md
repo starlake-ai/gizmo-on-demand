@@ -90,13 +90,38 @@ Config path: `gizmosql-proxy.acl`
 | Environment Variable | Config Key | Default | Description |
 |---|---|---|---|
 | `ACL_ENABLED` | `acl.enabled` | `true` | Enable or disable [ACL](acl.md)-based SQL authorization. When disabled, only [default validation rules](guide.md#default-validator-rules) apply |
-| `ACL_BASE_PATH` | `acl.base-path` | `/etc/gizmosql/acl` | Base directory containing [tenant folders](acl.md#tenant-directory-structure). Each subfolder is a tenant with its own YAML [grant files](acl.md#grant-format-yaml) |
+| `ACL_BASE_PATH` | `acl.base-path` | `/etc/gizmosql/acl` | Base path for [tenant folders](acl.md#tenant-directory-structure). Supports local paths and cloud URIs (`s3://`, `gs://`, `az://`). See [ACL Storage](acl.md#acl-storage) |
 | `ACL_DIALECT` | `acl.dialect` | `duckdb` | SQL dialect for parsing queries. Values: `duckdb` ([DuckDB](https://duckdb.org/) extensions), `ansi` (standard SQL) |
 | `ACL_GROUPS_CLAIM` | `acl.groups-claim` | `groups` | Name of the [JWT](https://datatracker.ietf.org/doc/html/rfc7519) claim containing user [group memberships](acl.md#principals). Supports JSON arrays (`["g1","g2"]`) and comma-separated strings (`"g1,g2"`) |
 | `ACL_MAX_TENANTS` | `acl.max-tenants` | `100` | Maximum number of tenant ACL policies cached in memory (LRU eviction) |
-| `ACL_WATCHER_ENABLED` | `acl.watcher.enabled` | `true` | Enable [file system watcher](acl.md#file-watcher) for automatic ACL reload when grant files change |
-| `ACL_WATCHER_DEBOUNCE_MS` | `acl.watcher.debounce-ms` | `500` | Debounce delay in milliseconds before processing file changes (prevents rapid reloads) |
-| `ACL_WATCHER_MAX_BACKOFF_MS` | `acl.watcher.max-backoff-ms` | `60000` | Maximum backoff delay in milliseconds when the file watcher encounters errors (exponential backoff) |
+| `ACL_WATCHER_ENABLED` | `acl.watcher.enabled` | `true` | Enable [change detection](acl.md#change-detection) for automatic ACL reload when grant files change |
+| `ACL_WATCHER_DEBOUNCE_MS` | `acl.watcher.debounce-ms` | `500` | Debounce delay in milliseconds before processing file changes — local filesystem only (prevents rapid reloads) |
+| `ACL_WATCHER_MAX_BACKOFF_MS` | `acl.watcher.max-backoff-ms` | `60000` | Maximum backoff delay in milliseconds when the file watcher encounters errors — local filesystem only (exponential backoff) |
+| `ACL_WATCHER_POLL_INTERVAL_MS` | `acl.watcher.poll-interval-ms` | `30000` | Polling interval in milliseconds for cloud storage backends (S3, GCS, Azure). Ignored for local filesystem |
+
+### Cloud Storage Authentication
+
+These variables are only used when `ACL_BASE_PATH` starts with a cloud URI prefix.
+
+**AWS S3** (when `ACL_BASE_PATH` starts with `s3://`):
+
+| Environment Variable | Config Key | Default | Description |
+|---|---|---|---|
+| `ACL_S3_REGION` | `acl.s3.region` | _(none)_ | AWS region. Auto-detected if absent |
+| `ACL_S3_CREDENTIALS_FILE` | `acl.s3.credentials-file` | _(none)_ | Path to AWS credentials file. Uses [Default Credential Chain](https://docs.aws.amazon.com/sdk-for-java/latest/developer-guide/credentials-chain.html) if absent |
+
+**Google Cloud Storage** (when `ACL_BASE_PATH` starts with `gs://`):
+
+| Environment Variable | Config Key | Default | Description |
+|---|---|---|---|
+| `ACL_GCS_PROJECT_ID` | `acl.gcs.project-id` | _(none)_ | GCP project ID. Auto-detected if absent |
+| `ACL_GCS_SERVICE_ACCOUNT_KEY_FILE` | `acl.gcs.service-account-key-file` | _(none)_ | Path to service account JSON key. Uses [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials) if absent |
+
+**Azure Blob Storage** (when `ACL_BASE_PATH` starts with `az://`):
+
+| Environment Variable | Config Key | Default | Description |
+|---|---|---|---|
+| `ACL_AZURE_CONNECTION_STRING` | `acl.azure.connection-string` | _(none)_ | Azure Storage connection string. Uses [DefaultAzureCredential](https://learn.microsoft.com/en-us/java/api/overview/azure/identity-readme#defaultazurecredential) if absent |
 
 ## On-Demand Process Manager
 
@@ -209,7 +234,7 @@ export LOG_LEVEL=WARN
 export LOG_STATEMENTS=false
 ```
 
-### With S3 Storage
+### With S3 Storage (data)
 
 ```bash
 export AWS_KEY_ID=AKIAIOSFODNN7EXAMPLE
@@ -217,6 +242,22 @@ export AWS_SECRET=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 export AWS_REGION=us-east-1
 export AWS_ENDPOINT=https://s3.amazonaws.com
 export SL_DATA_PATH=s3://my-bucket/warehouse/data
+```
+
+### With Cloud ACL Storage
+
+```bash
+# ACL grant files on S3
+export ACL_BASE_PATH=s3://my-acl-bucket/tenants
+export ACL_S3_REGION=eu-west-1
+export ACL_WATCHER_POLL_INTERVAL_MS=15000  # check every 15s
+
+# ACL grant files on GCS
+export ACL_BASE_PATH=gs://my-acl-bucket/tenants
+export ACL_GCS_PROJECT_ID=my-project
+
+# ACL grant files on Azure
+export ACL_BASE_PATH=az://my-acl-container/tenants
 ```
 
 ### With Custom Init SQL (no DuckLake)

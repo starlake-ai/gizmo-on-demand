@@ -3,8 +3,8 @@ package ai.starlake.acl.api
 import ai.starlake.acl.AclError
 import ai.starlake.acl.model.{AclPolicy, TenantId}
 import ai.starlake.acl.policy.TenantLoader
+import ai.starlake.acl.store.AclStore
 
-import java.nio.file.Path
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.locks.ReentrantLock
@@ -15,10 +15,12 @@ import java.util.concurrent.locks.ReentrantLock
   * TenantLoader with per-tenant locking to prevent thundering herd on cold
   * cache.
   *
+  * @param store
+  *   Storage backend for reading ACL files
   * @param maxTenants
   *   Maximum number of tenants to cache (None = unlimited)
   */
-private[api] class TenantCache(maxTenants: Option[Int]):
+private[api] class TenantCache(store: AclStore, maxTenants: Option[Int]):
 
   private case class CacheEntry(
       policy: Either[AclError, AclPolicy],
@@ -31,22 +33,20 @@ private[api] class TenantCache(maxTenants: Option[Int]):
   private val evictionLock = new ReentrantLock()
   private val loadLocks = new ConcurrentHashMap[TenantId, ReentrantLock]()
 
-  /** Get cached grants or load from disk.
+  /** Get cached grants or load from store.
     *
     * @param tenant
     *   Tenant identifier
-    * @param basePath
-    *   Base directory containing tenant folders
     * @return
     *   (Either[AclError, AclPolicy], usedStale: Boolean)
     */
-  def getOrLoad(tenant: TenantId, basePath: Path): (Either[AclError, AclPolicy], Boolean) =
+  def getOrLoad(tenant: TenantId): (Either[AclError, AclPolicy], Boolean) =
     Option(cache.get(tenant)) match
       case Some(entry) =>
         updateAccessOrder(tenant)
         (entry.policy, entry.staleReason.isDefined)
       case None =>
-        loadWithLock(tenant, basePath)
+        loadWithLock(tenant)
 
   /** Invalidate a tenant's cache entry. */
   def invalidate(tenant: TenantId): Unit =
@@ -66,18 +66,18 @@ private[api] class TenantCache(maxTenants: Option[Int]):
       case None => TenantStatus.NotLoaded
       case Some(entry) =>
         entry.staleReason match
-          case None                    => TenantStatus.Fresh(entry.loadedAt)
+          case None                  => TenantStatus.Fresh(entry.loadedAt)
           case Some((failedAt, msg)) => TenantStatus.Stale(entry.loadedAt, failedAt, msg)
 
   /** Attempt to reload a tenant's grants, keeping stale on failure. */
-  def reload(tenant: TenantId, basePath: Path): Unit =
+  def reload(tenant: TenantId): Unit =
     val lock = loadLocks.computeIfAbsent(tenant, _ => new ReentrantLock())
     lock.lock()
     try
       Option(cache.get(tenant)) match
         case Some(existing) =>
           // Try reload, mark stale on failure
-          TenantLoader.load(basePath, tenant).toEither match
+          TenantLoader.load(store, tenant).toEither match
             case Right(policy) =>
               val _ = cache.put(tenant, CacheEntry(Right(policy), Instant.now()))
             case Left(errors) =>
@@ -90,10 +90,10 @@ private[api] class TenantCache(maxTenants: Option[Int]):
               )
         case None =>
           // Not cached, do fresh load
-          val _ = loadWithLock(tenant, basePath)
+          val _ = loadWithLock(tenant)
     finally lock.unlock()
 
-  private def loadWithLock(tenant: TenantId, basePath: Path): (Either[AclError, AclPolicy], Boolean) =
+  private def loadWithLock(tenant: TenantId): (Either[AclError, AclPolicy], Boolean) =
     val lock = loadLocks.computeIfAbsent(tenant, _ => new ReentrantLock())
     lock.lock()
     try
@@ -102,7 +102,7 @@ private[api] class TenantCache(maxTenants: Option[Int]):
         case Some(entry) =>
           (entry.policy, entry.staleReason.isDefined)
         case None =>
-          val result = TenantLoader.load(basePath, tenant).toEither.left.map(_.head)
+          val result = TenantLoader.load(store, tenant).toEither.left.map(_.head)
           val entry = CacheEntry(result, Instant.now())
           cache.put(tenant, entry)
           updateAccessOrder(tenant)
