@@ -3,6 +3,7 @@ package ai.starlake.acl.api
 import ai.starlake.acl.AclError
 import ai.starlake.acl.model.{DenyReason, TableRef, TenantId, UserIdentity}
 import ai.starlake.acl.policy.ResourceLookupResult
+import ai.starlake.acl.store.LocalAclStore
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
@@ -56,7 +57,7 @@ class AclSqlTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   "AclSql.checkAccess" should "return allowed for valid tenant and authorized user" in {
     val tenant = createTenantWithGrant("acme", "db.sch.orders", List("user:alice"))
-    val aclSql = AclSql(basePath, baseTableLookup)
+    val aclSql = AclSql(new LocalAclStore(basePath), baseTableLookup)
 
     val result = aclSql.checkAccess(tenant, "SELECT * FROM db.sch.orders", userOf("alice"))
 
@@ -66,7 +67,7 @@ class AclSqlTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   it should "return denied for valid tenant and unauthorized user" in {
     val tenant = createTenantWithGrant("acme", "db.sch.orders", List("user:alice"))
-    val aclSql = AclSql(basePath, baseTableLookup)
+    val aclSql = AclSql(new LocalAclStore(basePath), baseTableLookup)
 
     val result = aclSql.checkAccess(tenant, "SELECT * FROM db.sch.orders", userOf("bob"))
 
@@ -82,7 +83,7 @@ class AclSqlTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   it should "return TenantNotFound error for unknown tenant" in {
     val unknownTenant = TenantId.parse("nonexistent").toOption.get
-    val aclSql = AclSql(basePath, baseTableLookup)
+    val aclSql = AclSql(new LocalAclStore(basePath), baseTableLookup)
 
     val result = aclSql.checkAccess(unknownTenant, "SELECT * FROM t", userOf("alice"))
 
@@ -101,7 +102,7 @@ class AclSqlTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   it should "accept String tenant parameter for valid tenant ID" in {
     val _ = createTenantWithGrant("acme", "db.sch.orders", List("user:alice"))
-    val aclSql = AclSql(basePath, baseTableLookup)
+    val aclSql = AclSql(new LocalAclStore(basePath), baseTableLookup)
 
     val result = aclSql.checkAccess("acme", "SELECT * FROM db.sch.orders", userOf("alice"), false, SqlContext.default)
 
@@ -110,7 +111,7 @@ class AclSqlTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
   }
 
   it should "return ConfigError for invalid tenant ID string" in {
-    val aclSql = AclSql(basePath, baseTableLookup)
+    val aclSql = AclSql(new LocalAclStore(basePath), baseTableLookup)
 
     val result = aclSql.checkAccess("invalid.tenant", "SELECT * FROM t", userOf("alice"), false, SqlContext.default)
 
@@ -126,7 +127,7 @@ class AclSqlTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
   it should "allow sequential access to different tenants" in {
     val tenant1 = createTenantWithGrant("acme", "db.sch.orders", List("user:alice"))
     val tenant2 = createTenantWithGrant("globex", "db.sch.products", List("user:bob"))
-    val aclSql = AclSql(basePath, baseTableLookup)
+    val aclSql = AclSql(new LocalAclStore(basePath), baseTableLookup)
 
     // First tenant
     val result1 = aclSql.checkAccess(tenant1, "SELECT * FROM db.sch.orders", userOf("alice"))
@@ -147,7 +148,7 @@ class AclSqlTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   "AclSql.invalidateTenant" should "clear cache for specific tenant" in {
     val tenant = createTenantWithGrant("acme", "db.sch.orders", List("user:alice"))
-    val aclSql = AclSql(basePath, baseTableLookup)
+    val aclSql = AclSql(new LocalAclStore(basePath), baseTableLookup)
 
     // Warm the cache
     val _ = aclSql.checkAccess(tenant, "SELECT * FROM db.sch.orders", userOf("alice"))
@@ -161,7 +162,7 @@ class AclSqlTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
   "AclSql.invalidateAll" should "clear all cached tenants" in {
     val tenant1 = createTenantWithGrant("acme", "db.sch.orders", List("user:alice"))
     val tenant2 = createTenantWithGrant("globex", "db.sch.products", List("user:bob"))
-    val aclSql = AclSql(basePath, baseTableLookup)
+    val aclSql = AclSql(new LocalAclStore(basePath), baseTableLookup)
 
     // Warm the cache
     val _ = aclSql.checkAccess(tenant1, "SELECT * FROM db.sch.orders", userOf("alice"))
@@ -181,7 +182,7 @@ class AclSqlTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
   // ---------------------------------------------------------------------------
 
   "AclSql.tenantStatus" should "return NotLoaded for never-accessed tenant" in {
-    val aclSql = AclSql(basePath, baseTableLookup)
+    val aclSql = AclSql(new LocalAclStore(basePath), baseTableLookup)
     val tenant = TenantId.parse("fresh").toOption.get
 
     aclSql.tenantStatus(tenant) shouldBe TenantStatus.NotLoaded
@@ -189,7 +190,7 @@ class AclSqlTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   it should "return Fresh after successful load" in {
     val tenant = createTenantWithGrant("acme", "db.sch.orders", List("user:alice"))
-    val aclSql = AclSql(basePath, baseTableLookup)
+    val aclSql = AclSql(new LocalAclStore(basePath), baseTableLookup)
 
     val _ = aclSql.checkAccess(tenant, "SELECT * FROM db.sch.orders", userOf("alice"))
 
@@ -202,7 +203,7 @@ class AclSqlTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   "AccessResult" should "include tenantId field" in {
     val tenant = createTenantWithGrant("acme", "db.sch.orders", List("user:alice"))
-    val aclSql = AclSql(basePath, baseTableLookup)
+    val aclSql = AclSql(new LocalAclStore(basePath), baseTableLookup)
 
     val result = aclSql.checkAccess(tenant, "SELECT * FROM db.sch.orders", userOf("alice"))
 
@@ -233,7 +234,7 @@ class AclSqlTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
         |""".stripMargin
     )
 
-    val aclSql = new AclSql(basePath, tenantAwareLookup)
+    val aclSql = new AclSql(new LocalAclStore(basePath), tenantAwareLookup)
     val _ = aclSql.checkAccess(tenant, "SELECT * FROM db.sch.view1", userOf("alice"))
 
     receivedTenant shouldBe Some(tenant)
@@ -245,7 +246,7 @@ class AclSqlTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   "AclSql.checkAccessAll" should "return results for multiple statements" in {
     val tenant = createTenantWithGrant("acme", "db.sch.orders", List("user:alice"))
-    val aclSql = AclSql(basePath, baseTableLookup)
+    val aclSql = AclSql(new LocalAclStore(basePath), baseTableLookup)
 
     val results = aclSql.checkAccessAll(
       tenant,
@@ -264,7 +265,7 @@ class AclSqlTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   it should "use per-call SqlContext for table qualification" in {
     val tenant = createTenantWithGrant("acme", "mydb.public.orders", List("user:alice"))
-    val aclSql = AclSql(basePath, baseTableLookup)
+    val aclSql = AclSql(new LocalAclStore(basePath), baseTableLookup)
     val ctx = SqlContext(defaultDatabase = Some("mydb"), defaultSchema = Some("public"))
 
     // With SqlContext defaults, unqualified table should resolve correctly
@@ -283,10 +284,140 @@ class AclSqlTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
     Files.createDirectories(tenantDir)
     val tenant = TenantId.parse("emptytenant").toOption.get
 
-    val aclSql = AclSql(basePath, baseTableLookup)
+    val aclSql = AclSql(new LocalAclStore(basePath), baseTableLookup)
     val result = aclSql.checkAccess(tenant, "SELECT * FROM db.sch.orders", userOf("alice"))
 
     result.isRight shouldBe true
     result.toOption.get.isDenied shouldBe true
+  }
+
+  // ---------------------------------------------------------------------------
+  // Transparent view: authorized=false must check underlying tables
+  // ---------------------------------------------------------------------------
+
+  it should "deny access to transparent view when underlying tables lack grants" in {
+    // Setup: grant on view (authorized=false) and on lineitem, but NOT on nation
+    val tenantDir = basePath.resolve("tpch2tenant")
+    Files.createDirectories(tenantDir)
+
+    val yaml =
+      """mode: strict
+        |grants:
+        |  - target: "tpch2.main.lineitem"
+        |    principals:
+        |      - "group:admin"
+        |  - target: "tpch2.main.revenue_per_nation"
+        |    principals:
+        |      - "group:admin"
+        |    authorized: false
+        |""".stripMargin
+
+    Files.writeString(tenantDir.resolve("acl.yaml"), yaml)
+    val tenant = TenantId.parse("tpch2tenant").toOption.get
+
+    // View resolver: revenue_per_nation is a view referencing lineitem and nation
+    val viewLookup: (TenantId, TableRef) => ResourceLookupResult = { (_, ref) =>
+      if ref.table == "revenue_per_nation" then
+        ResourceLookupResult.View("SELECT n_name, sum(l_extendedprice) FROM tpch2.main.lineitem JOIN tpch2.main.nation ON l_nationkey = n_nationkey GROUP BY n_name")
+      else
+        ResourceLookupResult.BaseTable
+    }
+
+    val adminUser = UserIdentity("admin-user", Set("admin"))
+    val aclSql = new AclSql(new LocalAclStore(basePath), viewLookup)
+    val result = aclSql.checkAccess(
+      tenant,
+      "SELECT * FROM tpch2.main.revenue_per_nation",
+      adminUser
+    )
+
+    // Should be DENIED because nation has no grant (transparent view checks base tables)
+    result.isRight shouldBe true
+    result.toOption.get.isDenied shouldBe true
+  }
+
+  it should "deny access when view SQL is unparseable (e.g. CREATE VIEW not stripped)" in {
+    // Bug: DuckLake returns view_definition as "CREATE VIEW ... AS SELECT ..."
+    // If stripCreateViewPrefix fails, the full CREATE VIEW SQL is passed to SqlParser
+    // which parses it as NonSelect → 0 tables extracted → view treated as having no dependencies
+    // → ALLOWED without checking underlying tables
+    val tenantDir = basePath.resolve("parsebugtenant")
+    Files.createDirectories(tenantDir)
+
+    val yaml =
+      """mode: strict
+        |grants:
+        |  - target: "tpch2.main.revenue_per_nation"
+        |    principals:
+        |      - "group:admin"
+        |    authorized: false
+        |""".stripMargin
+
+    Files.writeString(tenantDir.resolve("acl.yaml"), yaml)
+    val tenant = TenantId.parse("parsebugtenant").toOption.get
+
+    // View resolver returns the full CREATE VIEW SQL (simulating stripCreateViewPrefix failure)
+    val viewLookup: (TenantId, TableRef) => ResourceLookupResult = { (_, ref) =>
+      if ref.table == "revenue_per_nation" then
+        ResourceLookupResult.View(
+          "CREATE VIEW revenue_per_nation AS SELECT n_name, SUM(l_extendedprice) FROM tpch2.main.lineitem JOIN tpch2.main.nation ON l_nationkey = n_nationkey GROUP BY n_name"
+        )
+      else
+        ResourceLookupResult.BaseTable
+    }
+
+    val adminUser = UserIdentity("admin-user", Set("admin"))
+    val aclSql = new AclSql(new LocalAclStore(basePath), viewLookup)
+    val result = aclSql.checkAccess(
+      tenant,
+      "SELECT * FROM tpch2.main.revenue_per_nation",
+      adminUser
+    )
+
+    // Must be DENIED: unparseable view SQL should not silently allow access
+    result.isRight shouldBe true
+    result.toOption.get.isDenied shouldBe true
+  }
+
+  it should "allow access to transparent view when all underlying tables are granted" in {
+    val tenantDir = basePath.resolve("tpch2full")
+    Files.createDirectories(tenantDir)
+
+    val yaml =
+      """mode: strict
+        |grants:
+        |  - target: "tpch2.main.lineitem"
+        |    principals:
+        |      - "group:admin"
+        |  - target: "tpch2.main.nation"
+        |    principals:
+        |      - "group:admin"
+        |  - target: "tpch2.main.revenue_per_nation"
+        |    principals:
+        |      - "group:admin"
+        |    authorized: false
+        |""".stripMargin
+
+    Files.writeString(tenantDir.resolve("acl.yaml"), yaml)
+    val tenant = TenantId.parse("tpch2full").toOption.get
+
+    val viewLookup: (TenantId, TableRef) => ResourceLookupResult = { (_, ref) =>
+      if ref.table == "revenue_per_nation" then
+        ResourceLookupResult.View("SELECT n_name, sum(l_extendedprice) FROM tpch2.main.lineitem JOIN tpch2.main.nation ON l_nationkey = n_nationkey GROUP BY n_name")
+      else
+        ResourceLookupResult.BaseTable
+    }
+
+    val adminUser = UserIdentity("admin-user", Set("admin"))
+    val aclSql = new AclSql(new LocalAclStore(basePath), viewLookup)
+    val result = aclSql.checkAccess(
+      tenant,
+      "SELECT * FROM tpch2.main.revenue_per_nation",
+      adminUser
+    )
+
+    // Should be ALLOWED because all underlying tables have grants
+    result.isRight shouldBe true
+    result.toOption.get.isAllowed shouldBe true
   }
 }

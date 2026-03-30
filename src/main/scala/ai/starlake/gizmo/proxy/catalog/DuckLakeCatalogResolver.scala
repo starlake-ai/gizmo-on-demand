@@ -215,18 +215,19 @@ class DuckLakeCatalogResolver(
     parts.mkString(";\n") + ";"
 
   private[catalog] def queryTable(conn: Connection, ref: TableRef): ResourceLookupResult =
-    // First check if it's a base table via information_schema
-    if isBaseTable(ref) then
-      logger.debug(s"Catalog resolved ${ref.canonical} as BaseTable")
-      ResourceLookupResult.BaseTable
-    else
-      // Then check if it's a view
-      getViewSql(ref) match
-        case Some(sql) =>
-          logger.debug(s"Catalog resolved ${ref.canonical} as View, SQL: $sql")
-          ResourceLookupResult.View(sql)
-        case None =>
-          logger.info(s"Catalog resolved ${ref.canonical} as Unknown (not found in information_schema.tables as BASE TABLE, nor in information_schema.views with non-null view_definition)")
+    // Check views FIRST: DuckLake catalogs may list views as BASE TABLE in
+    // information_schema.tables, so checking isBaseTable first would misidentify them.
+    // information_schema.views is authoritative for view detection.
+    getViewSql(ref) match
+      case Some(sql) =>
+        logger.debug(s"Catalog resolved ${ref.canonical} as View, SQL length=${sql.length}")
+        ResourceLookupResult.View(sql)
+      case None =>
+        if isBaseTable(ref) then
+          logger.debug(s"Catalog resolved ${ref.canonical} as BaseTable")
+          ResourceLookupResult.BaseTable
+        else
+          logger.debug(s"Catalog resolved ${ref.canonical} as Unknown (not in information_schema.views nor information_schema.tables)")
           ResourceLookupResult.Unknown
 
   private def isBaseTable(ref: TableRef): Boolean =
@@ -259,6 +260,8 @@ class DuckLakeCatalogResolver(
     * but the ViewResolver expects just the SELECT statement.
     * Uses JSqlParser to properly extract the SELECT body, handling edge cases like
     * quoted view names containing " AS " and multiline SQL.
+    * Falls back to regex-based extraction when JSqlParser cannot parse DuckDB-specific
+    * syntax (e.g. schema-qualified functions like main.date_part()).
     */
   private[catalog] def stripCreateViewPrefix(sql: String): String =
     try
@@ -267,4 +270,13 @@ class DuckLakeCatalogResolver(
         case cv: CreateView => cv.getSelect.toString
         case _ => sql // Not a CREATE VIEW, return as-is
     catch
-      case _: Exception => sql // Parse failed, return as-is (old behavior as fallback)
+      case _: Exception =>
+        // JSqlParser failed (e.g. DuckDB-specific syntax). Try regex fallback.
+        regexStripCreateView(sql).getOrElse(sql)
+
+  /** Regex fallback for extracting SELECT body from CREATE VIEW statements.
+    * Handles: CREATE [OR REPLACE] [TEMP[ORARY]] VIEW [IF NOT EXISTS] [schema.]name AS <select>
+    */
+  private[catalog] def regexStripCreateView(sql: String): Option[String] =
+    val pattern = """(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+)?VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"[^"]*"|[^\s]+)\s+AS\s+(.+)$""".r
+    pattern.findFirstMatchIn(sql).map(_.group(1).trim)

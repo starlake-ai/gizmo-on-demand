@@ -189,3 +189,68 @@ class DuckLakeCatalogResolverUnitTest extends AnyFunSuite, Matchers:
       val sql = resolver.buildInitSql()
       sql should include("USER 'user''name'")
     finally resolver.close()
+
+  // --- regexStripCreateView: fallback when JSqlParser fails ---
+
+  test("regexStripCreateView extracts SELECT from simple CREATE VIEW"):
+    val resolver = UnitTestResolver()
+    try
+      val result = resolver.regexStripCreateView(
+        "CREATE VIEW my_view AS SELECT id FROM t"
+      )
+      result shouldBe Some("SELECT id FROM t")
+    finally resolver.close()
+
+  test("regexStripCreateView handles CREATE OR REPLACE VIEW"):
+    val resolver = UnitTestResolver()
+    try
+      val result = resolver.regexStripCreateView(
+        "CREATE OR REPLACE VIEW my_view AS SELECT id FROM t"
+      )
+      result shouldBe Some("SELECT id FROM t")
+    finally resolver.close()
+
+  test("regexStripCreateView handles schema-qualified view name"):
+    val resolver = UnitTestResolver()
+    try
+      val result = resolver.regexStripCreateView(
+        "CREATE VIEW main.revenue_per_nation AS SELECT n_name FROM nation"
+      )
+      result shouldBe Some("SELECT n_name FROM nation")
+    finally resolver.close()
+
+  test("regexStripCreateView handles quoted view name with spaces"):
+    val resolver = UnitTestResolver()
+    try
+      val result = resolver.regexStripCreateView(
+        """CREATE VIEW "my AS view" AS SELECT id FROM t"""
+      )
+      result shouldBe Some("SELECT id FROM t")
+    finally resolver.close()
+
+  test("regexStripCreateView handles DuckDB main.date_part syntax"):
+    val resolver = UnitTestResolver()
+    try
+      val sql = "CREATE VIEW revenue_per_nation AS SELECT n.n_name, main.date_part('year', o.o_orderdate) AS yr FROM lineitem l JOIN nation n ON l.l_nationkey = n.n_nationkey"
+      val result = resolver.regexStripCreateView(sql)
+      result.isDefined shouldBe true
+      result.get should startWith("SELECT")
+      result.get should include("main.date_part")
+    finally resolver.close()
+
+  test("regexStripCreateView returns None for non-CREATE VIEW"):
+    val resolver = UnitTestResolver()
+    try
+      val result = resolver.regexStripCreateView("SELECT id FROM t")
+      result shouldBe None
+    finally resolver.close()
+
+  test("stripCreateViewPrefix uses regex fallback for unparseable DuckDB syntax"):
+    val resolver = UnitTestResolver()
+    try
+      // Hypothetical DuckDB syntax that JSqlParser can't handle
+      val sql = "CREATE VIEW v AS SELECT main.list_aggregate(col, 'string_agg', ',') FROM t"
+      val result = resolver.stripCreateViewPrefix(sql)
+      result should startWith("SELECT")
+      result should not startWith "CREATE"
+    finally resolver.close()

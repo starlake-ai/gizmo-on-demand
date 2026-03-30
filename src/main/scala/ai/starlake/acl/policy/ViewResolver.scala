@@ -78,8 +78,16 @@ class ViewResolver(tenant: TenantId, lookup: (TenantId, TableRef) => ResourceLoo
             val parseErrors = extraction.statements.collect {
               case StatementResult.ParseError(_, _, msg) => msg
             }
-            if parseErrors.nonEmpty then
-              SingleTableResolution.ParseError(sql, parseErrors.mkString("; "))
+            // View SQL that parses as NonSelect (e.g. unstripped CREATE VIEW) must
+            // also be treated as a parse error: it yields zero extracted tables, which
+            // would silently bypass transparent-view dependency checks.
+            val nonSelectErrors = extraction.statements.collect {
+              case StatementResult.NonSelect(_, _, stmtType) =>
+                s"View SQL parsed as non-SELECT statement ($stmtType) — view_definition may not have been properly stripped"
+            }
+            val allErrors = parseErrors ++ nonSelectErrors
+            if allErrors.nonEmpty then
+              SingleTableResolution.ParseError(sql, allErrors.mkString("; "))
             else
               val allTables = extraction.allTables
               if allTables.isEmpty then
