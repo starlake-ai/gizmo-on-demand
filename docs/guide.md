@@ -22,31 +22,38 @@ This guide covers the GizmoSQL Proxy architecture, deployment modes, and detaile
 
 ### Component Overview
 
-```
-┌──────────────┐                                        ┌──────────────────────┐
-│   Clients    │                                        │   Data Sources       │
-│              │                                        │                      │
-│  DBeaver     │     ┌─────────────────────────────┐    │  ┌────────────────┐  │
-│  JDBC        │────▶│     GizmoSQL Proxy           │───▶│  │  GizmoSQL      │  │
-│  ADBC        │     │                              │    │  │  (DuckDB)      │  │
-│  Python      │◀────│  ┌──────────┐ ┌───────────┐ │◀───│  └───────┬────────┘  │
-│              │     │  │ Default  │ │ ACL       │ │    │          │           │
-└──────────────┘     │  │Validator │ │ Validator │ │    │  ┌───────▼────────┐  │
-                     │  └──────────┘ └───────────┘ │    │  │  PostgreSQL    │  │
-  Flight SQL         │                              │    │  │  (DuckLake     │  │
-  Protocol           │  Auth: Basic / Bearer (JWT)  │    │  │   Metadata)    │  │
-  (gRPC + TLS)       │  Protocol: Flight SQL        │    │  └────────────────┘  │
-                     └─────────────────────────────┘    │                      │
-                              │                         │  ┌────────────────┐  │
-                              │                         │  │  S3 / Local    │  │
-                              │ ACL Grants              │  │  (Data Files)  │  │
-                              │ (YAML files)            │  └────────────────┘  │
-                              ▼                         └──────────────────────┘
-                     ┌─────────────────┐
-                     │  ACL Base Path  │
-                     │  └── tenant/    │
-                     │      └── *.yaml │
-                     └─────────────────┘
+```mermaid
+graph TD
+    subgraph Clients["Clients"]
+        direction LR
+        DBeaver["DBeaver"]
+        JDBC["JDBC"]
+        ADBC["ADBC"]
+        Python["Python"]
+    end
+
+    Clients <-->|"Flight SQL #40;gRPC + TLS#41;"| Proxy
+
+    subgraph Proxy["GizmoSQL Proxy"]
+        direction LR
+        Auth["Auth: Basic / Bearer #40;JWT#41;"]
+        DefaultValidator["Default Validator"]
+        AclValidator["ACL Validator"]
+        Auth --> DefaultValidator --> AclValidator
+    end
+
+    Proxy <--> GizmoSQL
+
+    subgraph Backend["Data Sources"]
+        direction LR
+        GizmoSQL["GizmoSQL #40;DuckDB#41;"]
+        PG["PostgreSQL #40;DuckLake Metadata#41;"]
+        Storage["S3 / Local #40;Data Files#41;"]
+        GizmoSQL --> PG
+        GizmoSQL --> Storage
+    end
+
+    AclValidator -.->|"ACL Grants #40;YAML files#41;"| ACLPath[("ACL Base Path tenant/*.yaml")]
 ```
 
 ### Request Lifecycle
@@ -210,18 +217,17 @@ export INIT_SQL_OVERRIDE="ATTACH '/data/my_database.duckdb' AS mydb; USE mydb;"
 
 ### Authentication Flow
 
-```
-Client                    Proxy                     Backend
-  │                         │                          │
-  │ ── Basic Auth ────────▶ │                          │
-  │    (user:pass)          │                          │
-  │                         │── Create JWT ──┐         │
-  │                         │                │         │
-  │                         │◀── JWT token ──┘         │
-  │                         │                          │
-  │                         │── Bearer JWT ──────────▶ │
-  │                         │                          │
-  │ ◀── Response ────────── │ ◀── Response ─────────── │
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Proxy
+    participant Backend
+
+    Client->>Proxy: Basic Auth (user:pass)
+    Proxy->>Proxy: Create JWT token
+    Proxy->>Backend: Bearer JWT
+    Backend-->>Proxy: Response
+    Proxy-->>Client: Response
 ```
 
 ### Basic Auth
@@ -261,25 +267,19 @@ Users listed in [`VALIDATION_BYPASS_USERS`](configuration.md#statement-validatio
 
 The proxy chains two validators:
 
-```
-SQL Statement
-    │
-    ▼
-┌──────────────────────┐
-│  Default Validator   │─── Bypass user? ──────────▶ ALLOWED
-│                      │─── DROP statement? ───────▶ DENIED
-│                      │─── allow-by-default=true? ▶ ALLOWED
-│                      │─── SELECT/INSERT/UPDATE? ─▶ ALLOWED
-│                      │─── Otherwise ─────────────▶ DENIED
-└──────────┬───────────┘
-           │ (if ALLOWED)
-           ▼
-┌──────────────────────┐
-│  ACL Validator       │─── Parse SQL ─▶ Extract tables
-│  (if ACL_ENABLED)    │─── Check grants per table
-│                      │─── All tables allowed? ───▶ ALLOWED
-│                      │─── Any table denied? ─────▶ DENIED
-└──────────────────────┘
+```mermaid
+flowchart TD
+    SQL["SQL Statement"] --> DV{"Default Validator"}
+    DV -->|Bypass user?| ALLOWED1["✅ ALLOWED"]
+    DV -->|DROP statement?| DENIED1["❌ DENIED"]
+    DV -->|allow-by-default=true?| ALLOWED2["✅ ALLOWED"]
+    DV -->|SELECT/INSERT/UPDATE?| ALLOWED3["✅ ALLOWED"]
+    DV -->|Otherwise| DENIED2["❌ DENIED"]
+    DV -->|If ALLOWED| AV{"ACL Validator<br/>(if ACL_ENABLED)"}
+    AV -->|Parse SQL| Extract["Extract tables"]
+    Extract --> Check["Check grants per table"]
+    Check -->|All tables allowed?| ALLOWED4["✅ ALLOWED"]
+    Check -->|Any table denied?| DENIED3["❌ DENIED"]
 ```
 
 ### Default Validator Rules

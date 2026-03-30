@@ -10,35 +10,25 @@ The GizmoSQL Proxy includes a built-in SQL-level access control system based on 
 
 The following diagram shows the complete lifecycle of a SQL query through the ACL system:
 
-```
-Client                    Proxy                         Backend
-  |                         |                              |
-  |  1. SQL query           |                              |
-  |  (Flight SQL)           |                              |
-  |------------------------>|                              |
-  |                         |                              |
-  |                   2. Deserialize protobuf              |
-  |                      Extract SQL statement             |
-  |                         |                              |
-  |                   3. Default Validator                  |
-  |                      - Bypass users skip all           |
-  |                      - DROP statements blocked         |
-  |                      - allowByDefault rules            |
-  |                         |                              |
-  |                   4. ACL Validator (if enabled)         |
-  |                      a. Extract tenant (ACL_TENANT)    |
-  |                      b. Extract username (auth)        |
-  |                      c. Extract groups (JWT claims)    |
-  |                      d. Parse SQL -> table list        |
-  |                      e. Check each table vs grants     |
-  |                      f. ALL tables must be allowed     |
-  |                         |                              |
-  |                   5. ALLOWED?                          |
-  |                      Yes ──────────────────────────────>|
-  |                         |                              |
-  |                   6. DENIED?                           |
-  |<── Error (denial reason)|                              |
-  |                         |                              |
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Proxy
+    participant Backend
+
+    Client->>Proxy: 1. SQL query (Flight SQL)
+
+    Note over Proxy: 2. Deserialize protobuf<br/>Extract SQL statement
+
+    Note over Proxy: 3. Default Validator<br/>- Bypass users skip all<br/>- DROP statements blocked<br/>- allowByDefault rules
+
+    Note over Proxy: 4. ACL Validator (if enabled)<br/>a. Extract tenant (ACL_TENANT)<br/>b. Extract username (auth)<br/>c. Extract groups (JWT claims)<br/>d. Parse SQL → table list<br/>e. Check each table vs grants<br/>f. ALL tables must be allowed
+
+    alt 5. ALLOWED
+        Proxy->>Backend: Forward query
+    else 6. DENIED
+        Proxy-->>Client: Error (denial reason)
+    end
 ```
 
 1. **Client sends SQL query** via the [Flight SQL](https://arrow.apache.org/docs/format/FlightSql.html) protocol ([`getFlightInfo`](https://arrow.apache.org/docs/format/FlightSql.html#query-execution) or [`doAction/CreatePreparedStatement`](https://arrow.apache.org/docs/format/FlightSql.html#prepared-statements)).

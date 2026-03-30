@@ -4,20 +4,19 @@ A Flight SQL (Apache Arrow) proxy server that intercepts SQL queries, applies va
 
 ## Architecture
 
-```
-┌─────────────────┐     ┌──────────────────────────────────┐     ┌─────────────────┐     ┌──────────────┐
-│  Client          │     │  GizmoSQL Proxy                  │     │  GizmoSQL        │     │  PostgreSQL   │
-│  (DBeaver,      │────▶│  ┌────────────┐ ┌──────────┐    │────▶│  Backend         │────▶│  (DuckLake    │
-│   JDBC, ADBC)   │     │  │ Validation │ │ ACL      │    │     │  (DuckDB)        │     │   Metadata)   │
-│                 │◀────│  └────────────┘ └──────────┘    │◀────│                  │     │              │
-└─────────────────┘     └──────────────────────────────────┘     └─────────────────┘     └──────────────┘
-                               │                                        │
-                               │ TLS + JWT Auth                         │ S3 (optional)
-                               │                                        ▼
-                               │                                 ┌──────────────┐
-                               │                                 │  Data Storage │
-                               └──── ACL Grants (YAML files)     │  (local/S3)   │
-                                                                 └──────────────┘
+```mermaid
+graph LR
+    Client["Client<br/>(DBeaver, JDBC, ADBC)"] <-->|Flight SQL<br/>TLS + JWT Auth| Proxy
+
+    subgraph Proxy["GizmoSQL Proxy"]
+        Validation
+        ACL
+    end
+
+    Proxy <--> Backend["GizmoSQL Backend<br/>(DuckDB)"]
+    Backend --> PG["PostgreSQL<br/>(DuckLake Metadata)"]
+    Backend --> Storage["Data Storage<br/>(local/S3)"]
+    Proxy -.-|ACL Grants<br/>YAML files| ACLFiles[("ACL Files")]
 ```
 
 ## Features
