@@ -8,6 +8,7 @@ import ai.starlake.gizmo.proxy.catalog.DuckLakeCatalogResolver
 import ai.starlake.gizmo.proxy.config.{AclConfig, SessionConfig}
 import com.typesafe.scalalogging.LazyLogging
 
+import java.nio.file.{Files, Paths}
 import scala.jdk.CollectionConverters.*
 
 class AclStatementValidator(aclConfig: AclConfig, sessionConfig: SessionConfig)
@@ -54,6 +55,13 @@ class AclStatementValidator(aclConfig: AclConfig, sessionConfig: SessionConfig)
     catch case e: Exception => logger.warn(s"Error closing catalog resolver: ${e.getMessage}")
 
   override def validate(context: ValidationContext): ValidationResult =
+    // If the ACL base path does not exist, allow all queries (backward compatible)
+    val basePath = aclConfig.basePath
+    if !basePath.startsWith("s3://") && !basePath.startsWith("gs://") && !basePath.startsWith("az://") then
+      if !Files.exists(Paths.get(basePath)) then
+        logger.debug(s"ACL base path '$basePath' does not exist, allowing query")
+        return Allowed
+
     val tenantStr = sessionConfig.aclTenant
 
     TenantId.parse(tenantStr) match

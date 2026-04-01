@@ -12,6 +12,7 @@ import org.apache.arrow.memory.RootAllocator
 import java.io.File
 
 object ProxyServer extends LazyLogging:
+
   def main(args: Array[String]): Unit =
     // Parse environment variable for Gizmo server port
     val gizmoServerPort =

@@ -64,15 +64,28 @@ final class TenantWatcher(
     val _ = Try(scheduler.awaitTermination(1, TimeUnit.SECONDS))
     Option(watcher).foreach(w => { val _ = Try(w.close()) })
 
+  /** True if the watcher was initialized successfully (basePath exists). */
+  @volatile var initialized: Boolean = false
+
   private def initializeWatcher(): Unit =
-    // Wait for basePath if it doesn't exist (tolerant startup)
+    // Wait for basePath with a bounded retry (3 attempts, 3s apart)
+    val maxWaitAttempts = 3
+    var waitAttempt = 0
     while running.get() && !Files.exists(basePath) do
-      logger.info(s"Waiting for base path to exist: $basePath")
-      Thread.sleep(1000)
+      waitAttempt += 1
+      if waitAttempt > maxWaitAttempts then
+        logger.warn(
+          s"ACL base path '$basePath' does not exist after $waitAttempt/$maxWaitAttempts attempts. " +
+            "ACL enforcement is disabled — all queries will be allowed."
+        )
+        return
+      logger.info(s"Waiting for base path to exist: $basePath (attempt $waitAttempt/$maxWaitAttempts)")
+      Thread.sleep(3000)
 
     if running.get() then
       watcher = FileSystems.getDefault.newWatchService()
       registerRecursively(basePath)
+      initialized = true
       logger.info(s"TenantWatcher started monitoring: $basePath")
 
   private def startWatchThread(): Unit =
@@ -85,6 +98,10 @@ final class TenantWatcher(
     while running.get() do
       try
         if watcher == null then initializeWatcher()
+        if watcher == null then
+          // basePath never appeared — stop the watch thread silently
+          logger.info("TenantWatcher stopping: base path not available")
+          return
 
         val key = watcher.take()
         attempt = 0
