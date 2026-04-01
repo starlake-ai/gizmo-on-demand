@@ -17,8 +17,12 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
   private val managedByLabel = "managed-by"
   private val managedByValue = "gizmo-process-manager"
 
-  private def podName(name: String): String = s"gizmo-proxy-$name"
-  private def serviceName(name: String): String = s"gizmo-proxy-$name"
+  /** Sanitize name to be RFC 1123 compliant (K8s metadata.name) */
+  private def sanitizeName(name: String): String =
+    name.toLowerCase.replaceAll("[^a-z0-9-]", "-").replaceAll("-+", "-").stripPrefix("-").stripSuffix("-").take(63)
+
+  private def podName(name: String): String = s"gizmo-proxy-${sanitizeName(name)}"
+  private def serviceName(name: String): String = s"gizmo-proxy-${sanitizeName(name)}"
 
   private def buildLabels(name: String): java.util.Map[String, String] =
     val labels = new java.util.HashMap[String, String]()
