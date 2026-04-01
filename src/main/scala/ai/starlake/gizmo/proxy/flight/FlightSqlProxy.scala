@@ -9,6 +9,7 @@ import ai.starlake.gizmo.proxy.validation.{
   ValidationContext
 }
 
+import ai.starlake.gizmo.proxy.auth.AuthenticationService
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import com.auth0.jwt.interfaces.Claim
@@ -30,7 +31,8 @@ class FlightSqlProxy(
     config: GizmoSqlProxyConfig,
     validator: StatementValidator,
     allocator: RootAllocator,
-    gizmoServerManager: Option[GizmoServerManager]
+    gizmoServerManager: Option[GizmoServerManager],
+    authService: Option[AuthenticationService] = None
 ) extends NoOpFlightSqlProducer,
       LazyLogging:
 
@@ -48,13 +50,15 @@ class FlightSqlProxy(
     config,
     allocator,
     backendClients,
-    handshakeCredentials
+    handshakeCredentials,
+    authService
   )
   val middlewareFactory = new FlightSqlProxy.AuthMiddlewareFactory(
     config,
     allocator,
     backendClients,
-    handshakeCredentials
+    handshakeCredentials,
+    authService
   )
 
   private def getBackendClient(
@@ -296,7 +300,8 @@ object FlightSqlProxy:
       config: GizmoSqlProxyConfig,
       allocator: RootAllocator,
       backendClients: ConcurrentHashMap[String, FlightClient],
-      handshakeCredentials: ConcurrentHashMap[String, String]
+      handshakeCredentials: ConcurrentHashMap[String, String],
+      authService: Option[AuthenticationService]
   ) extends ServerAuthHandler
       with LazyLogging:
 
@@ -329,21 +334,59 @@ object FlightSqlProxy:
           password = username.substring(pos + delimiter.length)
           username = username.substring(0, pos)
 
-        val authHeader =
-          s"Basic ${java.util.Base64.getEncoder.encodeToString(s"$username:$password".getBytes(StandardCharsets.UTF_8))}"
+        // Discovery handshake: client sends username="__discover__" to learn the OAuth URL
+        if username == "__discover__" then
+          authService.flatMap(_.oauthBaseUrl) match
+            case Some(oauthUrl) =>
+              logger.info(s"Discovery handshake: returning OAuth URL $oauthUrl")
+              // Return OAuth URL as Bearer token JSON (mimics C++ GizmoSQL DiscoveryMiddleware)
+              val jsonPayload = s"""{"oauth_url":"$oauthUrl"}"""
+              outgoing.send(jsonPayload.getBytes(StandardCharsets.UTF_8))
+              return true
+            case None =>
+              throw new IllegalArgumentException("OAuth is not enabled on this server")
+
+        // Token-based auth: username="token", password=<external JWT/ID token>
+        // (used by ADBC Python driver after OAuth browser flow)
+        val (authenticatedUsername, role, groups, authMethod) =
+          if username == "token" then
+            authService match
+              case Some(service) =>
+                service.authenticateBearer(password) match
+                  case Right(profile) =>
+                    (profile.username, profile.role, profile.groups.toList, "BootstrapToken")
+                  case Left(error) =>
+                    throw new IllegalArgumentException(s"Token authentication failed: $error")
+              case None =>
+                throw new IllegalArgumentException("No auth providers configured for token validation")
+          else
+            // Regular username/password auth
+            val (r, g) = authService match
+              case Some(service) =>
+                service.authenticateBasic(username, password) match
+                  case Right(profile) => (profile.role, profile.groups.toList)
+                  case Left(error) =>
+                    throw new IllegalArgumentException(s"Authentication failed: $error")
+              case None => ("admin", Nil)
+            (username, r, g, "Basic")
+
+        val jwtToken = AuthMiddleware.createJWTToken(
+          authenticatedUsername, config.session.jwtSecretKey, role, groups, authMethod
+        )
+        val bearerAuthHeader = s"Bearer $jwtToken"
 
         backendClients.put(
-          username,
+          authenticatedUsername,
           createBackendClientWithAuth(
             config,
             allocator,
-            username,
-            authHeader,
+            authenticatedUsername,
+            bearerAuthHeader,
             logger
           )
         )
-        handshakeCredentials.put(username, authHeader)
-        outgoing.send(username.getBytes(StandardCharsets.UTF_8))
+        handshakeCredentials.put(authenticatedUsername, bearerAuthHeader)
+        outgoing.send(authenticatedUsername.getBytes(StandardCharsets.UTF_8))
         true
       catch
         case e: Exception =>
@@ -365,14 +408,21 @@ object FlightSqlProxy:
           java.util.Optional.of(username)
         else java.util.Optional.empty()
 
-  class AuthMiddleware(username: String, jwtSecretKey: String)
+  class AuthMiddleware(username: String, jwtSecretKey: String, oauthUrl: Option[String] = None)
       extends FlightServerMiddleware
       with LazyLogging:
     override def onBeforeSendingHeaders(outgoingHeaders: CallHeaders): Unit =
-      outgoingHeaders.insert(
-        "authorization",
-        s"Bearer ${AuthMiddleware.createJWTToken(username, jwtSecretKey)}"
-      )
+      oauthUrl match
+        case Some(url) =>
+          // Discovery response: return OAuth URL in headers (mimics C++ DiscoveryMiddleware)
+          val jsonPayload = s"""{"oauth_url":"$url"}"""
+          outgoingHeaders.insert("authorization", s"Bearer $jsonPayload")
+          outgoingHeaders.insert("x-gizmosql-oauth-url", url)
+        case None =>
+          outgoingHeaders.insert(
+            "authorization",
+            s"Bearer ${AuthMiddleware.createJWTToken(username, jwtSecretKey)}"
+          )
 
     override def onCallCompleted(status: CallStatus): Unit =
       FlightSqlProxy.currentUsername.remove()
@@ -382,25 +432,34 @@ object FlightSqlProxy:
       FlightSqlProxy.currentClaims.remove()
 
   object AuthMiddleware:
-    def createJWTToken(username: String, jwtSecretKey: String): String =
+    def createJWTToken(
+        username: String,
+        jwtSecretKey: String,
+        role: String = "admin",
+        groups: List[String] = Nil,
+        authMethod: String = "Basic"
+    ): String =
       val now = Instant.now()
-      JWT
+      val builder = JWT
         .create()
         .withIssuer("gizmosql")
         .withJWTId(s"gizmosql-server-${UUID.randomUUID()}")
         .withIssuedAt(Date.from(now))
         .withExpiresAt(Date.from(now.plusSeconds(3600)))
         .withClaim("sub", username)
-        .withClaim("role", "admin")
-        .withClaim("auth_method", "Basic")
+        .withClaim("role", role)
+        .withClaim("auth_method", authMethod)
         .withClaim("session_id", UUID.randomUUID().toString)
-        .sign(Algorithm.HMAC256(jwtSecretKey))
+      if groups.nonEmpty then
+        builder.withClaim("groups", java.util.Arrays.asList(groups*))
+      builder.sign(Algorithm.HMAC256(jwtSecretKey))
 
   class AuthMiddlewareFactory(
       config: GizmoSqlProxyConfig,
       allocator: RootAllocator,
       backendClients: ConcurrentHashMap[String, FlightClient],
-      handshakeCredentials: ConcurrentHashMap[String, String]
+      handshakeCredentials: ConcurrentHashMap[String, String],
+      authService: Option[AuthenticationService]
   ) extends FlightServerMiddleware.Factory[AuthMiddleware]
       with LazyLogging:
 
@@ -435,8 +494,51 @@ object FlightSqlProxy:
             password = username.substring(pos + delimiter.length)
             username = username.substring(0, pos)
 
-          val jwtToken =
-            AuthMiddleware.createJWTToken(username, config.session.jwtSecretKey)
+          // Discovery: username="__discover__" returns OAuth URL
+          if username == "__discover__" then
+            authService.flatMap(_.oauthBaseUrl) match
+              case Some(oauthUrl) =>
+                logger.info(s"Discovery via Basic auth: returning OAuth URL $oauthUrl")
+                FlightSqlProxy.currentUsername.set("__discover__")
+                return new AuthMiddleware("__discover__", config.session.jwtSecretKey, Some(oauthUrl))
+              case None =>
+                throw CallStatus.UNAUTHENTICATED
+                  .withDescription("OAuth is not enabled on this server")
+                  .toRuntimeException()
+
+          // Token-based auth: username="token", password=<external JWT>
+          val (authenticatedUsername, role, groups, authMethod) =
+            if username == "token" then
+              authService match
+                case Some(service) =>
+                  service.authenticateBearer(password) match
+                    case Right(profile) =>
+                      (profile.username, profile.role, profile.groups.toList, "BootstrapToken")
+                    case Left(error) =>
+                      throw CallStatus.UNAUTHENTICATED
+                        .withDescription(s"Token authentication failed: $error")
+                        .toRuntimeException()
+                case None =>
+                  throw CallStatus.UNAUTHENTICATED
+                    .withDescription("No auth providers configured for token validation")
+                    .toRuntimeException()
+            else
+              // Regular username/password: authenticate via configured providers
+              val (r, g, m) = authService match
+                case Some(service) =>
+                  service.authenticateBasic(username, password) match
+                    case Right(profile) =>
+                      (profile.role, profile.groups.toList, profile.authMethod)
+                    case Left(error) =>
+                      throw CallStatus.UNAUTHENTICATED
+                        .withDescription(s"Authentication failed: $error")
+                        .toRuntimeException()
+                case None => ("admin", Nil, "Basic")
+              (username, r, g, m)
+
+          val jwtToken = AuthMiddleware.createJWTToken(
+            authenticatedUsername, config.session.jwtSecretKey, role, groups, authMethod
+          )
           val bearerAuthHeader = s"Bearer $jwtToken"
 
           val decodedMinted = JWT.decode(jwtToken)
@@ -445,40 +547,82 @@ object FlightSqlProxy:
           )
 
           backendClients.put(
-            username,
+            authenticatedUsername,
             createBackendClientWithAuth(
               config,
               allocator,
-              username,
+              authenticatedUsername,
               bearerAuthHeader,
               logger
             )
           )
-          FlightSqlProxy.currentUsername.set(username)
-          new AuthMiddleware(username, config.session.jwtSecretKey)
+          FlightSqlProxy.currentUsername.set(authenticatedUsername)
+          new AuthMiddleware(authenticatedUsername, config.session.jwtSecretKey)
         else if authHeader.startsWith("Bearer ") then
-          val decodedJWT = JWT
-            .require(Algorithm.HMAC256(config.session.jwtSecretKey))
-            .withIssuer("gizmosql")
-            .build()
-            .verify(authHeader.substring(7))
-          val username = decodedJWT.getClaim("sub").asString()
-          FlightSqlProxy.currentClaims.set(decodedJWT.getClaims.asScala.toMap)
+          val token = authHeader.substring(7)
+          // First try self-issued JWT verification (existing behavior)
+          try
+            val decodedJWT = JWT
+              .require(Algorithm.HMAC256(config.session.jwtSecretKey))
+              .withIssuer("gizmosql")
+              .build()
+              .verify(token)
+            val username = decodedJWT.getClaim("sub").asString()
+            FlightSqlProxy.currentClaims.set(decodedJWT.getClaims.asScala.toMap)
 
-          if !backendClients.containsKey(username) then
-            backendClients.put(
-              username,
-              createBackendClientWithAuth(
-                config,
-                allocator,
+            if !backendClients.containsKey(username) then
+              backendClients.put(
                 username,
-                authHeader,
-                logger
+                createBackendClientWithAuth(
+                  config,
+                  allocator,
+                  username,
+                  authHeader,
+                  logger
+                )
               )
-            )
 
-          FlightSqlProxy.currentUsername.set(username)
-          new AuthMiddleware(username, config.session.jwtSecretKey)
+            FlightSqlProxy.currentUsername.set(username)
+            new AuthMiddleware(username, config.session.jwtSecretKey)
+          catch
+            case _: Exception =>
+              // Not a self-issued token — try external providers
+              authService match
+                case Some(service) =>
+                  service.authenticateBearer(token) match
+                    case Right(profile) =>
+                      // Mint a backend JWT with the validated identity
+                      val jwtToken = AuthMiddleware.createJWTToken(
+                        profile.username, config.session.jwtSecretKey,
+                        profile.role, profile.groups.toList, profile.authMethod
+                      )
+                      val bearerAuthHeader = s"Bearer $jwtToken"
+
+                      val decodedMinted = JWT.decode(jwtToken)
+                      FlightSqlProxy.currentClaims.set(
+                        decodedMinted.getClaims.asScala.toMap
+                      )
+
+                      backendClients.put(
+                        profile.username,
+                        createBackendClientWithAuth(
+                          config,
+                          allocator,
+                          profile.username,
+                          bearerAuthHeader,
+                          logger
+                        )
+                      )
+                      FlightSqlProxy.currentUsername.set(profile.username)
+                      new AuthMiddleware(profile.username, config.session.jwtSecretKey)
+                    case Left(error) =>
+                      throw CallStatus.UNAUTHENTICATED
+                        .withDescription(s"Bearer authentication failed: $error")
+                        .toRuntimeException()
+                case None =>
+                  throw CallStatus.UNAUTHENTICATED
+                    .withDescription("Invalid Bearer token")
+                    .toRuntimeException()
         else
           throw CallStatus.UNAUTHENTICATED
             .withDescription("Invalid Authorization Header type!")

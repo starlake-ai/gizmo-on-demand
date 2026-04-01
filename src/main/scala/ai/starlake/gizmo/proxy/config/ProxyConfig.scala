@@ -104,7 +104,8 @@ case class GizmoSqlProxyConfig(
     validation: ValidationConfig,
     acl: AclConfig,
     logging: LoggingConfig,
-    session: SessionConfig
+    session: SessionConfig,
+    authentication: AuthenticationConfig
 ) derives ConfigReader
 
 object ProxyConfig:

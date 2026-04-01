@@ -84,10 +84,15 @@ lazy val root = (project in file("."))
       Dependencies.blobstoreCore,
       Dependencies.blobstoreS3,
       Dependencies.blobstoreGcs,
-      Dependencies.blobstoreAzure
+      Dependencies.blobstoreAzure,
 
       // Kubernetes
-      Dependencies.kubernetesClient
+      Dependencies.kubernetesClient,
+
+      // Authentication
+      Dependencies.nimbusJoseJwt,
+      Dependencies.hikariCp,
+      Dependencies.jbcrypt
     ),
     assembly / assemblyMergeStrategy := {
       case PathList("META-INF", "versions", "9", "module-info.class") =>

@@ -77,4 +77,9 @@ object Dependencies {
   // Kubernetes
   val kubernetesClient =
     "io.fabric8" % "kubernetes-client" % Versions.fabric8
+
+  // Authentication
+  val nimbusJoseJwt = "com.nimbusds" % "nimbus-jose-jwt" % Versions.nimbusJoseJwt
+  val hikariCp = "com.zaxxer" % "HikariCP" % Versions.hikariCp
+  val jbcrypt = "at.favre.lib" % "bcrypt" % Versions.jbcrypt
 }

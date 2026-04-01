@@ -1,5 +1,6 @@
 package ai.starlake.gizmo.proxy
 
+import ai.starlake.gizmo.proxy.auth.AuthenticationService
 import ai.starlake.gizmo.proxy.config.ProxyConfig
 import ai.starlake.gizmo.proxy.flight.FlightSqlProxy
 import ai.starlake.gizmo.proxy.gizmoserver.GizmoServerManager
@@ -109,6 +110,19 @@ object ProxyServer extends LazyLogging:
           "No Gizmo server port specified, skipping Gizmo server startup"
         )
         null
+    // Initialize authentication service if any providers are configured
+    val authConfig = config.authentication
+    val authService: Option[AuthenticationService] =
+      if authConfig.providers.nonEmpty || authConfig.database.enabled ||
+        authConfig.keycloak.enabled || authConfig.google.enabled ||
+        authConfig.azure.enabled || authConfig.aws.enabled
+      then
+        logger.info(s"Initializing authentication service (providers: ${authConfig.providers})")
+        Some(new AuthenticationService(authConfig, config.session))
+      else
+        logger.info("No authentication providers configured, using legacy auth (hardcoded admin role)")
+        None
+
     // Register shutdown hook to stop Gizmo server even on aggressive shutdown
     Runtime.getRuntime.addShutdownHook(
       new Thread:
@@ -116,12 +130,13 @@ object ProxyServer extends LazyLogging:
           logger.info("Shutdown hook triggered")
           if gizmoServerManager != null then gizmoServerManager.stop()
           aclValidator.foreach(_.close())
+          authService.foreach(_.close())
     )
 
     val allocator = new RootAllocator(Long.MaxValue)
 
     // Create proxy producer (it will manage backend connections per user)
-    val proxyProducer = new FlightSqlProxy(config, validator, allocator, Option(gizmoServerManager))
+    val proxyProducer = new FlightSqlProxy(config, validator, allocator, Option(gizmoServerManager), authService)
 
     // Determine if TLS should be used (only if enabled AND cert files are provided)
     val useTls = config.proxy.tls.enabled &&
@@ -208,5 +223,6 @@ object ProxyServer extends LazyLogging:
       gizmoServerManager.stop()
 
     aclValidator.foreach(_.close())
+    authService.foreach(_.close())
     allocator.close()
     logger.info("GizmoSQL Proxy Server stopped")
