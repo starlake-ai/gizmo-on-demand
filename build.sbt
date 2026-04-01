@@ -6,6 +6,27 @@ lazy val root = (project in file("."))
   .settings(
     name := "gizmo-on-demand",
     resolvers ++= Resolvers.allResolvers,
+    libraryDependencySchemes += "io.circe" %% "circe-yaml-common" % VersionScheme.Always,
+    // Pin Netty to version compatible with arrow-memory-netty 14.x
+    // (PooledByteBufAllocatorL accesses chunkSize field removed in Netty >= 4.1.100)
+    dependencyOverrides ++= Seq(
+      "io.netty" % "netty-buffer"                          % Versions.netty,
+      "io.netty" % "netty-common"                          % Versions.netty,
+      "io.netty" % "netty-codec"                           % Versions.netty,
+      "io.netty" % "netty-codec-http"                      % Versions.netty,
+      "io.netty" % "netty-codec-http2"                     % Versions.netty,
+      "io.netty" % "netty-codec-socks"                     % Versions.netty,
+      "io.netty" % "netty-handler"                         % Versions.netty,
+      "io.netty" % "netty-handler-proxy"                   % Versions.netty,
+      "io.netty" % "netty-transport"                       % Versions.netty,
+      "io.netty" % "netty-transport-native-unix-common"    % Versions.netty,
+      "io.netty" % "netty-transport-classes-epoll"         % Versions.netty,
+      "io.netty" % "netty-transport-classes-kqueue"        % Versions.netty,
+      "io.netty" % "netty-resolver"                        % Versions.netty,
+      "io.netty" % "netty-resolver-dns"                    % Versions.netty,
+      "io.netty" % "netty-resolver-dns-classes-macos"      % Versions.netty,
+      "io.netty" % "netty-codec-dns"                       % Versions.netty
+    ),
     libraryDependencies ++= Seq(
       Dependencies.tapirCore,
       Dependencies.tapirJdkHttpServer,
@@ -51,6 +72,19 @@ lazy val root = (project in file("."))
       Dependencies.jsqlParser,
       Dependencies.jsqlTranspiler,
       Dependencies.starlakeJdbc,
+
+      // DuckDB JDBC (for catalog resolver)
+      Dependencies.duckdbJdbc,
+
+      // ACL (from acl-sql)
+      Dependencies.circeYaml,
+      Dependencies.catsCore,
+
+      // fs2-blobstore (multi-cloud ACL storage)
+      Dependencies.blobstoreCore,
+      Dependencies.blobstoreS3,
+      Dependencies.blobstoreGcs,
+      Dependencies.blobstoreAzure
 
       // Kubernetes
       Dependencies.kubernetesClient

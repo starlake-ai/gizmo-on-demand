@@ -53,12 +53,27 @@ object Dependencies {
   // Testing
   val scalaTest = "org.scalatest" %% "scalatest" % Versions.scalaTest % Test
 
+  // YAML
+  val circeYaml = "io.circe" %% "circe-yaml-v12" % Versions.circeYaml
+
+  // Cats
+  val catsCore = "org.typelevel" %% "cats-core" % Versions.cats
+
   // JSQLParser
-  val jsqlParser = "com.github.jsqlparser" % "jsqlparser" % Versions.jsqlParser
+  // Source: https://mvnrepository.com/artifact/com.manticore-projects.jsqlformatter/jsqlparser
+  val jsqlParser = "com.manticore-projects.jsqlformatter" % "jsqlparser" % Versions.jsqlParser
   val jsqlTranspiler =
     "ai.starlake.jsqltranspiler" % "jsqltranspiler" % Versions.jsqlTranspiler
   val starlakeJdbc = "ai.starlake.jdbc" % "starlakejdbc" % Versions.starlakeJdbc
 
+  // DuckDB JDBC
+  val duckdbJdbc = "org.duckdb" % "duckdb_jdbc" % Versions.duckdb
+
+  // fs2-blobstore (multi-cloud ACL storage)
+  val blobstoreCore = "com.github.fs2-blobstore" %% "core" % Versions.blobstore
+  val blobstoreS3 = "com.github.fs2-blobstore" %% "s3" % Versions.blobstore
+  val blobstoreGcs = "com.github.fs2-blobstore" %% "gcs" % Versions.blobstore
+  val blobstoreAzure = "com.github.fs2-blobstore" %% "azure" % Versions.blobstore
   // Kubernetes
   val kubernetesClient =
     "io.fabric8" % "kubernetes-client" % Versions.fabric8

@@ -10,10 +10,11 @@ class GizmoServerManager(
     port: Int,
     initSqlCommands: String,
     envVars: Map[String, String],
-    idleTimeout: Int
+    idleTimeout: Int,
+    scriptPath: String = ai.starlake.gizmo.ondemand.EnvVars.defaultGizmoScript,
+    startupWaitMs: Long = 5000L
 ) extends LazyLogging:
 
-  import ai.starlake.gizmo.ondemand.EnvVars
   import scala.jdk.CollectionConverters.*
 
   @volatile private var process: Option[java.lang.Process] = None
@@ -21,6 +22,7 @@ class GizmoServerManager(
   private var idleCheckScheduler: ScheduledExecutorService | Null = null
   private var idleCheckFuture: ScheduledFuture[?] | Null = null
   @volatile private var stoppedByIdleTimeout = false
+  @volatile private var startupComplete = false
 
   /** Record activity to reset the idle timer */
   def recordActivity(): Unit =
@@ -39,11 +41,12 @@ class GizmoServerManager(
     startIdleTimeoutChecker()
 
   private def startInternal(): Unit =
+    startupComplete = false
     logger.info(
-      s"Starting Backend Gizmo server on port $port using script: ${EnvVars.defaultGizmoScript}"
+      s"Starting Backend Gizmo server on port $port using script: $scriptPath"
     )
 
-    val command = Seq(EnvVars.defaultGizmoScript).asJava
+    val command = Seq(scriptPath).asJava
     val processBuilder = new java.lang.ProcessBuilder(command)
 
     val env = processBuilder.environment()
@@ -86,19 +89,14 @@ class GizmoServerManager(
     // In these cases, stopInternal() sets process = None BEFORE destroying the process,
     // so this callback sees process.isEmpty and does NOT call halt().
     p.onExit().thenAccept { _ =>
-      if process.isDefined then
-        // Backend exited unexpectedly (crashed) - kill the proxy too
+      if process.isDefined && startupComplete then
+        // Backend exited unexpectedly (crashed) after successful startup - kill the proxy too
         logger.error(
           s"Backend Gizmo server (PID: ${p.pid()}) exited unexpectedly with code ${p.exitValue()}"
         )
         logger.error("Initiating Proxy Server shutdown due to backend failure")
-        try
-          System.out.println("Attempting to exit...")
-          Runtime.getRuntime().halt(1)
-        catch
-          case se: SecurityException =>
-            System.err.println("SecurityManager prevented exit: " + se.getMessage)
-      // else: Intentional stop (idle timeout, request complete, or shutdown) - proxy keeps running
+        onUnexpectedExit(p)
+      // else: Intentional stop, or startup failure (handled by startInternal's isAlive check)
     }
 
     // Gobblers
@@ -122,10 +120,11 @@ class GizmoServerManager(
     logger.info(s"Backend Gizmo server started (PID: $pid)")
 
     // Give the container a moment to start
-    Thread.sleep(5000)
+    Thread.sleep(startupWaitMs)
 
     // Check if it's still alive
     if (!p.isAlive) {
+      process = None
       logger.error(
         s"Backend Gizmo server died immediately with exit code: ${p.exitValue()}"
       )
@@ -134,6 +133,7 @@ class GizmoServerManager(
       )
     }
 
+    startupComplete = true
     logger.info(s"Backend Gizmo server confirmed running (PID: $pid)")
 
   private def cleanupPort(port: Int): Unit =
@@ -205,6 +205,17 @@ class GizmoServerManager(
       if (!proc.waitFor(5, TimeUnit.SECONDS)) then
         proc.destroyForcibly()
     }
+
+  /** Called when the backend process exits unexpectedly after successful startup.
+    * Override in tests to avoid calling halt(1).
+    */
+  protected def onUnexpectedExit(process: java.lang.Process): Unit =
+    try
+      System.out.println("Attempting to exit...")
+      Runtime.getRuntime().halt(1)
+    catch
+      case se: SecurityException =>
+        System.err.println("SecurityManager prevented exit: " + se.getMessage)
 
   def stop(): Unit =
     logger.info("Stopping Backend Gizmo server...")
