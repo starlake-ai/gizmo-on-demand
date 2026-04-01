@@ -22,7 +22,11 @@ case class KubernetesConfig(
     resourceLimitsMemory: String,
     externalHost: Option[String],
     volumeClaimName: Option[String],
-    volumeMountPath: String
+    volumeMountPath: String,
+    nginxConfigMapName: Option[String],
+    nginxConfigMapNamespace: Option[String],
+    externalPortRangeStart: Int,
+    externalPortRangeEnd: Int
 )
 
 object KubernetesConfig:

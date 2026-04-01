@@ -13,7 +13,8 @@ case class ManagedProcess(
     handle: ProcessHandle,
     host: String,
     arguments: Map[String, String],
-    externalHost: Option[String] = None
+    externalHost: Option[String] = None,
+    externalPort: Option[Int] = None
 )
 
 /** Process manager that handles lifecycle of processes */
@@ -41,7 +42,8 @@ class ProcessManager(backend: ProcessBackend) extends LazyLogging:
         handle = dp.handle,
         host = dp.host,
         arguments = dp.arguments,
-        externalHost = dp.externalHost
+        externalHost = dp.externalHost,
+        externalPort = dp.externalPort
       )
       processes.putIfAbsent(dp.name, managedProcess) match
         case Some(_) =>
@@ -134,7 +136,8 @@ class ProcessManager(backend: ProcessBackend) extends LazyLogging:
                   spawnResult.handle,
                   spawnResult.host,
                   arguments,
-                  externalHost = spawnResult.externalHost
+                  externalHost = spawnResult.externalHost,
+                  externalPort = spawnResult.externalPort
                 )
 
                 processes.putIfAbsent(processName, managedProcess) match
@@ -156,7 +159,8 @@ class ProcessManager(backend: ProcessBackend) extends LazyLogging:
                         message =
                           s"Proxy Process started successfully on port ${spawnResult.port}",
                         host = Some(spawnResult.host),
-                        externalHost = spawnResult.externalHost
+                        externalHost = spawnResult.externalHost,
+                        externalPort = spawnResult.externalPort
                       )
                     )
 
@@ -195,7 +199,8 @@ class ProcessManager(backend: ProcessBackend) extends LazyLogging:
         pid = mp.handle.pid,
         status = if backend.isAlive(mp.handle) then "running" else "stopped",
         host = Some(mp.host),
-        externalHost = mp.externalHost
+        externalHost = mp.externalHost,
+        externalPort = mp.externalPort
       )
     }.toList
     ListProcessesResponse(processInfos)

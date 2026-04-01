@@ -1,7 +1,7 @@
 package ai.starlake.gizmo.ondemand.backend
 
 /** Result returned by a backend after spawning a process */
-case class SpawnResult(handle: ProcessHandle, host: String, port: Int, externalHost: Option[String] = None)
+case class SpawnResult(handle: ProcessHandle, host: String, port: Int, externalHost: Option[String] = None, externalPort: Option[Int] = None)
 
 /** A process discovered during startup recovery */
 case class DiscoveredProcess(
@@ -11,7 +11,8 @@ case class DiscoveredProcess(
     port: Int,
     backendPort: Int,
     arguments: Map[String, String],
-    externalHost: Option[String] = None
+    externalHost: Option[String] = None,
+    externalPort: Option[Int] = None
 )
 
 /** Abstract handle to a spawned process — local or remote */
@@ -23,7 +24,7 @@ case class LocalProcessHandle(process: java.lang.Process) extends ProcessHandle:
   def pid: Option[Long] = Some(process.pid())
 
 /** Handle wrapping a Kubernetes Pod + Service */
-case class K8sProcessHandle(podName: String, serviceName: String, namespace: String)
+case class K8sProcessHandle(podName: String, serviceName: String, namespace: String, instanceName: String)
     extends ProcessHandle:
   def pid: Option[Long] = None
 

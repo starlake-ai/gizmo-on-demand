@@ -14,6 +14,10 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
 
   private val client: KubernetesClient = new KubernetesClientBuilder().build()
   private val watches = TrieMap.empty[String, Watch]
+  private val allocatedPorts = java.util.Collections.newSetFromMap(
+    new java.util.concurrent.ConcurrentHashMap[Int, java.lang.Boolean]()
+  ).asScala
+  private val instanceExternalPorts = TrieMap.empty[String, Int]
   private val managedByLabel = "managed-by"
   private val managedByValue = "gizmo-process-manager"
 
@@ -30,6 +34,42 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     labels.put("gizmo-instance", name)
     config.labels.foreach { case (k, v) => labels.put(k, v) }
     labels
+
+  private def allocateExternalPort(): Option[Int] =
+    config.nginxConfigMapName.flatMap { _ =>
+      allocatedPorts.synchronized {
+        (config.externalPortRangeStart to config.externalPortRangeEnd)
+          .find(p => !allocatedPorts.contains(p))
+          .map { port => allocatedPorts.add(port); port }
+      }
+    }
+
+  private def releaseExternalPort(port: Int): Unit = allocatedPorts.remove(port)
+
+  private def patchNginxConfigMap(externalPort: Int, sName: String): Unit =
+    for
+      cmName <- config.nginxConfigMapName
+      cmNs = config.nginxConfigMapNamespace.getOrElse(config.namespace)
+    do
+      try
+        val entry = s"${config.namespace}/$sName:${config.proxyPort}"
+        val op: java.util.function.UnaryOperator[ConfigMap] = c => { c.getData.put(externalPort.toString, entry); c }
+        client.configMaps().inNamespace(cmNs).withName(cmName).edit(op)
+        logger.info(s"Patched nginx ConfigMap $cmNs/$cmName: $externalPort -> $entry")
+      catch case e: Exception =>
+        logger.error(s"Failed to patch nginx ConfigMap for port $externalPort", e)
+
+  private def removeNginxConfigMapEntry(externalPort: Int): Unit =
+    for
+      cmName <- config.nginxConfigMapName
+      cmNs = config.nginxConfigMapNamespace.getOrElse(config.namespace)
+    do
+      try
+        val op: java.util.function.UnaryOperator[ConfigMap] = c => { c.getData.remove(externalPort.toString); c }
+        client.configMaps().inNamespace(cmNs).withName(cmName).edit(op)
+        logger.info(s"Removed nginx ConfigMap entry for port $externalPort")
+      catch case e: Exception =>
+        logger.error(s"Failed to remove nginx ConfigMap entry for port $externalPort", e)
 
   private def buildPod(
       pName: String,
@@ -180,6 +220,13 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
       client.services().inNamespace(ns).resource(service).create()
       logger.info(s"Created service $sName in namespace $ns")
 
+      // Allocate external port and patch nginx ConfigMap
+      val externalPort = allocateExternalPort()
+      externalPort.foreach { ep =>
+        patchNginxConfigMap(ep, sName)
+        instanceExternalPorts.put(name, ep)
+      }
+
       // Wait for pod to be ready
       try
         client
@@ -191,6 +238,12 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
       catch
         case e: Exception =>
           logger.error(s"Pod $pName did not become ready within ${config.startupTimeoutSeconds}s", e)
+          // Clean up nginx ConfigMap entry on failure
+          externalPort.foreach { ep =>
+            removeNginxConfigMapEntry(ep)
+            instanceExternalPorts.remove(name)
+            releaseExternalPort(ep)
+          }
           client.pods().inNamespace(ns).withName(pName).delete()
           client.services().inNamespace(ns).withName(sName).delete()
           return Left(
@@ -201,7 +254,7 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
       setupWatch(pName, ns, name, onExit)
 
       val host = s"$sName.$ns.svc.cluster.local"
-      Right(SpawnResult(K8sProcessHandle(pName, sName, ns), host, podProxyPort, config.externalHost))
+      Right(SpawnResult(K8sProcessHandle(pName, sName, ns, name), host, podProxyPort, config.externalHost, externalPort))
     catch
       case e: Exception =>
         logger.error(s"Failed to create K8s resources for '$name'", e)
@@ -286,10 +339,23 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
             setupWatch(pName, ns, instanceName, onExitFactory(instanceName))
 
             val host = s"$sName.$ns.svc.cluster.local"
-            val handle = K8sProcessHandle(pName, sName, ns)
+            val handle = K8sProcessHandle(pName, sName, ns, instanceName)
 
-            logger.info(s"Discovered existing pod $pName (instance=$instanceName, port=$proxyPort)")
-            Some(DiscoveredProcess(instanceName, handle, host, proxyPort, backendPort, arguments, config.externalHost))
+            // Recover external port from nginx ConfigMap
+            val externalPort: Option[Int] = for
+              cmName <- config.nginxConfigMapName
+              cmNs = config.nginxConfigMapNamespace.getOrElse(config.namespace)
+              cm <- Option(client.configMaps().inNamespace(cmNs).withName(cmName).get())
+              data <- Option(cm.getData).map(_.asScala.toMap)
+              entry <- data.find((_, v) => v.contains(s"/$sName:"))
+              port <- entry._1.toIntOption
+            yield
+              allocatedPorts.add(port)
+              instanceExternalPorts.put(instanceName, port)
+              port
+
+            logger.info(s"Discovered existing pod $pName (instance=$instanceName, port=$proxyPort, externalPort=${externalPort.getOrElse("none")})")
+            Some(DiscoveredProcess(instanceName, handle, host, proxyPort, backendPort, arguments, config.externalHost, externalPort))
       }
     catch
       case e: Exception =>
@@ -298,9 +364,12 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
 
   override def stop(handle: ProcessHandle): Either[String, Unit] =
     handle match
-      case K8sProcessHandle(pName, sName, ns) =>
+      case K8sProcessHandle(pName, sName, ns, instanceName) =>
         try
-          val instanceName = pName.stripPrefix("gizmo-proxy-")
+          instanceExternalPorts.remove(instanceName).foreach { ep =>
+            removeNginxConfigMapEntry(ep)
+            releaseExternalPort(ep)
+          }
           watches.remove(instanceName).foreach(_.close())
           client.pods().inNamespace(ns).withName(pName).delete()
           client.services().inNamespace(ns).withName(sName).delete()
@@ -315,7 +384,7 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
 
   override def isAlive(handle: ProcessHandle): Boolean =
     handle match
-      case K8sProcessHandle(pName, _, ns) =>
+      case K8sProcessHandle(pName, _, ns, _) =>
         try
           val pod = client.pods().inNamespace(ns).withName(pName).get()
           if pod == null then false
@@ -330,6 +399,11 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     val ns = config.namespace
     var count = 0
     try
+      // Clean up all nginx ConfigMap entries
+      instanceExternalPorts.values.foreach(removeNginxConfigMapEntry)
+      instanceExternalPorts.clear()
+      allocatedPorts.clear()
+
       watches.values.foreach(_.close())
       watches.clear()
 
