@@ -28,19 +28,32 @@ A multi-tenant platform for provisioning on-demand GizmoSQL database instances e
 
 The **Process Manager** is a REST API that provisions and manages proxy instances. Each **FlightSQL Proxy** authenticates users (Basic, Bearer/JWT, ODBC), validates SQL statements, enforces table-level ACLs, and forwards queries to its dedicated **GizmoSQL backend** which connects to a DuckLake catalog (PostgreSQL metadata + S3/local data lake storage).
 
-```mermaid
-graph LR
-    Client["Client<br/>(DBeaver, JDBC, ADBC)"] <-->|Flight SQL<br/>TLS + JWT Auth| Proxy
-
-    subgraph Proxy["GizmoSQL Proxy"]
-        Validation
-        ACL
-    end
-
-    Proxy <--> Backend["GizmoSQL Backend<br/>(DuckDB)"]
-    Backend --> PG["PostgreSQL<br/>(DuckLake Metadata)"]
-    Backend --> Storage["Data Storage<br/>(local/S3)"]
-    Proxy -.-|ACL Grants<br/>YAML files| ACLFiles[("ACL Files")]
+```
+  +---------------------+        +---------------------------+
+  |       Client        |        |       ACL Files           |
+  | (DBeaver,JDBC,ADBC) |        |     (YAML grants)         |
+  +---------+-----------+        +-------------+-------------+
+            |                                  |
+            | Flight SQL                       |
+            | TLS + JWT Auth                   |
+            v                                  v
+  +---------------------------------------------+
+  |             GizmoSQL Proxy                   |
+  |  +----------------+  +-------------------+   |
+  |  |  Validation     |  |  ACL              |   |
+  |  +----------------+  +-------------------+   |
+  +---------------------+------------------------+
+                        |
+                        v
+  +---------------------+------------------------+
+  |          GizmoSQL Backend (DuckDB)           |
+  +----------+------------------+----------------+
+             |                  |
+             v                  v
+  +----------+-------+  +------+-----------------+
+  |   PostgreSQL     |  |   Data Storage         |
+  | (DuckLake Meta)  |  |   (local / S3)         |
+  +------------------+  +------------------------+
 ```
 
 ### Runtime Backends
