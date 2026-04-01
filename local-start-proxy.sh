@@ -92,18 +92,18 @@ export LOG_LEVEL="${LOG_LEVEL:-DEBUG}"
 export LOG_STATEMENTS="${LOG_STATEMENTS:-true}"
 export LOG_VALIDATION="${LOG_VALIDATION:-true}"
 
-export SL_DB_ID="${SL_DB_ID:-tpch2}"
+export SL_DB_ID="${SL_DB_ID:-tpch001_ducklake_local}"
 export PG_HOST="${PG_HOST:-host.docker.internal}"
 export PG_PORT=${PG_PORT:-5432}
 export PG_USERNAME="${PG_USERNAME:-ducklake}"
 export PG_PASSWORD="${PG_PASSWORD:-ducklake}"
-export SL_DATA_PATH="${SL_DATA_PATH:-/Users/tiboun/projects/starlake/gizmo-on-demand/gizmo_data}"
+export SL_DATA_PATH="${SL_DATA_PATH:-/Users/hayssams/git/starlake-api/starlake-api-samples/100/192/ducklake_files/tpch001_ducklake_local}"
 
 export GIZMOSQL_USERNAME="${GIZMOSQL_USERNAME:-gizmosql_username}"
 export GIZMOSQL_PASSWORD="${GIZMOSQL_PASSWORD:-gizmosql_password}"
 export JWT_SECRET_KEY="${JWT_SECRET_KEY:-a_very_secret_key}"
 
-export SL_GIZMO_DEFAULT_SCRIPT="${SL_GIZMO_DEFAULT_SCRIPT:-/Users/tiboun/projects/starlake/gizmo-on-demand/local-start-gizmo.sh}"
+export SL_GIZMO_DEFAULT_SCRIPT="${SL_GIZMO_DEFAULT_SCRIPT:-/Users/hayssams/git/public/gizmo-on-demand/local-start-gizmo.sh}"
 
 echo "========================================="
 echo "  GizmoSQL Proxy Server"

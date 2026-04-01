@@ -40,6 +40,9 @@ docker run \
     --env PRINT_QUERIES="1" \
     --env DATABASE_FILENAME=":memory:" \
     --env GIZMOSQL_LOG_LEVEL="debug" \
+    --env GIZMOSQL_ACCESS_LOG="debug" \
+    --env GIZMOSQL_QUERY_LOG_LEVEL="debug" \
+    --env GIZMOSQL_AUTH_LOG_LEVEL="debug" \
     --env SECRET_KEY="$JWT_SECRET_KEY" \
     --env INIT_SQL_COMMANDS="$INIT_SQL_COMMANDS" \
     --entrypoint /opt/gizmosql/scripts/docker-start-sl-gizmosql.sh \
