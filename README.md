@@ -1,8 +1,8 @@
 # Gizmo On-Demand
 
-A multi-tenant platform for provisioning on-demand GizmoSQL database instances exposed through Apache Arrow Flight SQL. Each user or workload gets an isolated proxy+backend stack with authentication, SQL validation, and automatic lifecycle management.
+A multi-tenant platform for provisioning on-demand GizmoSQL database instances exposed through Apache Arrow Flight SQL. Each user or workload gets an isolated proxy+backend stack with authentication, SQL validation, table-level ACL, and automatic lifecycle management.
 
-## How It Works
+## Architecture
 
 ```
                          +---------------------------+
@@ -26,22 +26,52 @@ A multi-tenant platform for provisioning on-demand GizmoSQL database instances e
      +---------------------+  +------------------+  +------------------+
 ```
 
-The **Process Manager** is a REST API that provisions and manages proxy instances. Each **FlightSQL Proxy** authenticates users (Basic, Bearer/JWT, ODBC), validates SQL statements, and forwards queries to its dedicated **GizmoSQL backend** which connects to a DuckLake catalog (PostgreSQL metadata + S3/local data lake storage).
+The **Process Manager** is a REST API that provisions and manages proxy instances. Each **FlightSQL Proxy** authenticates users (Basic, Bearer/JWT, ODBC), validates SQL statements, enforces table-level ACLs, and forwards queries to its dedicated **GizmoSQL backend** which connects to a DuckLake catalog (PostgreSQL metadata + S3/local data lake storage).
 
-Two runtime backends are available:
+```mermaid
+graph LR
+    Client["Client<br/>(DBeaver, JDBC, ADBC)"] <-->|Flight SQL<br/>TLS + JWT Auth| Proxy
 
-- **Local mode** (default) -- Spawns OS processes with paired port allocation from a configurable range.
-- **Kubernetes mode** -- Creates a Pod + Service per instance. Each pod runs the same container image internally. Pods are discoverable via cluster DNS and are automatically recovered if the Process Manager restarts.
+    subgraph Proxy["GizmoSQL Proxy"]
+        Validation
+        ACL
+    end
 
-Set `SL_GIZMO_RUNTIME_TYPE` to `local` or `kubernetes` to select the backend.
+    Proxy <--> Backend["GizmoSQL Backend<br/>(DuckDB)"]
+    Backend --> PG["PostgreSQL<br/>(DuckLake Metadata)"]
+    Backend --> Storage["Data Storage<br/>(local/S3)"]
+    Proxy -.-|ACL Grants<br/>YAML files| ACLFiles[("ACL Files")]
+```
 
-## Quick Start
+### Runtime Backends
 
-### Prerequisites
+Two runtime backends are available (set `SL_GIZMO_RUNTIME_TYPE`):
 
-- JDK 11+
+- **Local mode** (`local`, default) -- Spawns OS processes with paired port allocation from a configurable range.
+- **Kubernetes mode** (`kubernetes` or `k8s`) -- Creates a Pod + Service per instance. Pods are discoverable via cluster DNS and are automatically recovered if the Process Manager restarts.
+
+### Features
+
+- **Multi-tenant on-demand provisioning** via REST API
+- **SQL statement validation** -- blocks DROP, configurable allow/deny
+- **Table-level ACL** with hierarchical grants (database -> schema -> table)
+- **Multi-tenant ACL** with folder-based isolation and hot-reload via file watcher
+- **JWT authentication** with group-based permissions
+- **TLS encryption** -- auto-generated self-signed certificates for development
+- **DuckLake integration** with PostgreSQL metadata
+- **Optional S3 storage** for data files
+- **On-demand backend process management** with idle timeout
+- **Prepared statement validation**
+- **Kubernetes and local runtime** with automatic pod recovery
+
+## Prerequisites
+
+- JDK 11+ (17+ recommended)
 - sbt (Scala Build Tool)
 - Docker (for containerized deployment)
+- PostgreSQL (for DuckLake metadata)
+
+## Quick Start
 
 ### Build
 
@@ -53,7 +83,7 @@ sbt assembly
 
 The uber-jar is placed in `distrib/`.
 
-### Run Locally
+### Run Locally (Process Manager)
 
 ```bash
 # Start the process manager
@@ -69,13 +99,23 @@ The uber-jar is placed in `distrib/`.
 ./stop-process.sh my-session
 ```
 
+### Run the Proxy Standalone
+
+```bash
+# 1. Start the GizmoSQL backend (requires Docker)
+./local-start-gizmo.sh
+
+# 2. Start the proxy (in another terminal)
+./local-start-proxy.sh
+
+# 3. Connect with JDBC
+# URL: jdbc:arrow-flight-sql://localhost:31338?useEncryption=true&disableCertificateVerification=true
+```
+
 ### Run with Docker
 
 ```bash
-# Build the image
 make docker-build
-
-# Run
 make docker-run
 
 # Or use the startup script directly
@@ -91,6 +131,18 @@ export SL_GIZMO_K8S_IMAGE=starlakeai/gizmo-on-demand:latest
 ```
 
 Each proxy instance is reachable at `gizmo-proxy-{name}.{namespace}.svc.cluster.local` on the configured proxy port. With `ClusterIP` (default), instances are only accessible within the cluster. Use `NodePort` or `LoadBalancer` for external access.
+
+## Connecting to a Proxy Instance
+
+Once a proxy is running, connect with any Apache Arrow Flight SQL client (JDBC, ODBC, or native Flight).
+
+**JDBC example:**
+
+```
+jdbc:arrow-flight-sql://localhost:11900?useEncryption=true&disableCertificateVerification=true
+```
+
+**Authentication:** Provide `GIZMOSQL_USERNAME` / `GIZMOSQL_PASSWORD` as the JDBC username/password. The proxy issues a JWT token on first authentication and accepts it for subsequent requests.
 
 ## API Reference
 
@@ -179,18 +231,6 @@ GET /api/process/list
 POST /api/process/stopAll
 ```
 
-## Connecting to a Proxy Instance
-
-Once a proxy is running, connect with any Apache Arrow Flight SQL client (JDBC, ODBC, or native Flight).
-
-**JDBC example:**
-
-```
-jdbc:arrow-flight-sql://localhost:11900?useEncryption=true&disableCertificateVerification=true
-```
-
-**Authentication:** Provide `GIZMOSQL_USERNAME` / `GIZMOSQL_PASSWORD` as the JDBC username/password. The proxy issues a JWT token on first authentication and accepts it for subsequent requests.
-
 ## Configuration
 
 ### Process Manager
@@ -228,44 +268,6 @@ When `SL_GIZMO_RUNTIME_TYPE=kubernetes`, each proxy instance is created as a Kub
 
 **Process recovery:** On startup, the Process Manager discovers existing pods labeled `managed-by=gizmo-process-manager` and re-registers them. This means a Process Manager restart does not orphan running proxy instances.
 
-### Database Connection
-
-These are passed as `arguments` when starting a process:
-
-| Variable | Default | Description |
-|---|---|---|
-| `SL_DB_ID` | - | Starlake project / database identifier |
-| `SL_DATA_PATH` | - | Path to DuckLake data files |
-| `PG_HOST` | `host.docker.internal` | PostgreSQL metadata host |
-| `PG_PORT` | `5432` | PostgreSQL metadata port |
-| `PG_USERNAME` | `postgres` | PostgreSQL username |
-| `PG_PASSWORD` | - | PostgreSQL password |
-
-### GizmoSQL Backend
-
-| Variable | Default | Description |
-|---|---|---|
-| `GIZMOSQL_USERNAME` | - | Username for GizmoSQL authentication |
-| `GIZMOSQL_PASSWORD` | - | Password for GizmoSQL authentication |
-| `JWT_SECRET_KEY` | - | Secret key for JWT token signing |
-| `DATABASE_BACKEND` | `duckdb` | Database backend type |
-| `DATABASE_FILENAME` | `data/TPC-H-small.duckdb` | Path to database file (`:memory:` for in-memory) |
-| `TLS_ENABLED` | `0` | Enable TLS for backend (`0`/`1`) |
-| `PRINT_QUERIES` | `1` | Log queries (`0`/`1`) |
-| `READONLY` | `0` | Read-only mode (`0`/`1`) |
-| `QUERY_TIMEOUT` | `0` | Query timeout in seconds (`0` = no timeout) |
-
-### S3 Storage (Optional)
-
-When DuckLake files are stored in S3-compatible storage, pass these as additional `arguments`:
-
-| Variable | Description |
-|---|---|
-| `AWS_KEY_ID` | S3 access key ID |
-| `AWS_SECRET` | S3 secret access key |
-| `AWS_REGION` | S3 region |
-| `AWS_ENDPOINT` | S3 endpoint URL (for MinIO or compatible services) |
-
 ### Proxy
 
 These are typically set automatically by the Process Manager:
@@ -280,6 +282,44 @@ These are typically set automatically by the Process Manager:
 | `GIZMO_SERVER_HOST` | `127.0.0.1` | Backend GizmoSQL host |
 | `GIZMO_SERVER_PORT` | `31337` | Backend GizmoSQL port |
 
+### GizmoSQL Backend
+
+| Variable | Default | Description |
+|---|---|---|
+| `GIZMOSQL_USERNAME` | - | Username for GizmoSQL authentication |
+| `GIZMOSQL_PASSWORD` | - | Password for GizmoSQL authentication |
+| `JWT_SECRET_KEY` | `a_very_secret_key` | Secret key for JWT token signing |
+| `DATABASE_BACKEND` | `duckdb` | Database backend type |
+| `DATABASE_FILENAME` | `data/TPC-H-small.duckdb` | Path to database file (`:memory:` for in-memory) |
+| `TLS_ENABLED` | `0` | Enable TLS for backend (`0`/`1`) |
+| `PRINT_QUERIES` | `1` | Log queries (`0`/`1`) |
+| `READONLY` | `0` | Read-only mode (`0`/`1`) |
+| `QUERY_TIMEOUT` | `0` | Query timeout in seconds (`0` = no timeout) |
+
+### Database Connection
+
+These are passed as `arguments` when starting a process:
+
+| Variable | Default | Description |
+|---|---|---|
+| `SL_DB_ID` | - | Starlake project / database identifier |
+| `SL_DATA_PATH` | - | Path to DuckLake data files |
+| `PG_HOST` | `host.docker.internal` | PostgreSQL metadata host |
+| `PG_PORT` | `5432` | PostgreSQL metadata port |
+| `PG_USERNAME` | `postgres` | PostgreSQL username |
+| `PG_PASSWORD` | - | PostgreSQL password |
+
+### S3 Storage (Optional)
+
+When DuckLake files are stored in S3-compatible storage, pass these as additional `arguments`:
+
+| Variable | Description |
+|---|---|
+| `AWS_KEY_ID` | S3 access key ID |
+| `AWS_SECRET` | S3 secret access key |
+| `AWS_REGION` | S3 region |
+| `AWS_ENDPOINT` | S3 endpoint URL (for MinIO or compatible services) |
+
 ### SQL Validation
 
 | Variable | Default | Description |
@@ -289,6 +329,16 @@ These are typically set automatically by the Process Manager:
 | `VALIDATION_BYPASS_USERS` | `admin` | Comma-separated list of users who bypass validation |
 
 Default rules: `SELECT`, `INSERT`, and `UPDATE` (with `WHERE`) are allowed. `DROP DATABASE` and `DROP TABLE` are always denied.
+
+### Access Control Lists (ACL)
+
+| Variable | Default | Description |
+|---|---|---|
+| `ACL_ENABLED` | `true` | Enable/disable ACL validation |
+| `ACL_BASE_PATH` | `/etc/gizmosql/acl` | Directory containing tenant ACL grants |
+| `ACL_TENANT` | `default` | Active ACL tenant |
+
+ACL grants are defined in YAML files and support hierarchical permissions (database -> schema -> table) with multi-tenant folder-based isolation. Grant files are hot-reloaded via a file watcher.
 
 ## Idle Timeout
 
@@ -332,93 +382,16 @@ make docker-stop    # Stop container
 make docker-logs    # Tail container logs
 ```
 
-## Further Documentation
-
-- [Product Requirements Document](docs/PRD.md)
-- [Architecture Document](docs/ARCHITECTURE.md)
-
-
-# GizmoSQL Proxy - Flight SQL Proxy with Integrated Access Control
-
-A Flight SQL (Apache Arrow) proxy server that intercepts SQL queries, applies validation rules and table-level Access Control Lists (ACLs) before forwarding them to a GizmoSQL/DuckDB backend. Designed for DuckLake environments with PostgreSQL metadata storage.
-
-## Architecture
-
-```mermaid
-graph LR
-    Client["Client<br/>(DBeaver, JDBC, ADBC)"] <-->|Flight SQL<br/>TLS + JWT Auth| Proxy
-
-    subgraph Proxy["GizmoSQL Proxy"]
-        Validation
-        ACL
-    end
-
-    Proxy <--> Backend["GizmoSQL Backend<br/>(DuckDB)"]
-    Backend --> PG["PostgreSQL<br/>(DuckLake Metadata)"]
-    Backend --> Storage["Data Storage<br/>(local/S3)"]
-    Proxy -.-|ACL Grants<br/>YAML files| ACLFiles[("ACL Files")]
-```
-
-## Features
-
-- **SQL statement validation** — blocks DROP, configurable allow/deny
-- **Table-level ACL** with hierarchical grants (database -> schema -> table)
-- **Multi-tenant ACL** with folder-based isolation
-- **JWT authentication** with group-based permissions
-- **TLS encryption** — auto-generated self-signed certificates for development
-- **DuckLake integration** with PostgreSQL metadata
-- **Optional S3 storage** for data files
-- **Hot-reload of ACL grant files** via file watcher
-- **On-demand backend process management** with idle timeout
-- **Prepared statement validation**
-
-## Prerequisites
-
-- Java 17+ (JDK)
-- Docker Desktop
-- sbt (Scala build tool)
-- PostgreSQL (for DuckLake metadata)
-- openssl (for TLS certificate generation)
-
-## Quick Start
-
-```bash
-# 1. Build the project
-sbt assembly
-
-# 2. Start the GizmoSQL backend (requires Docker)
-./local-start-gizmo.sh
-
-# 3. Start the proxy (in another terminal)
-./local-start-proxy.sh
-
-# 4. Connect with JDBC
-# URL: jdbc:arrow-flight-sql://localhost:31338?useEncryption=true&disableCertificateVerification=true
-```
-
-## Key Environment Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `PROXY_PORT` | `31338` | Proxy listen port |
-| `GIZMO_SERVER_PORT` | `31337` | Backend GizmoSQL port |
-| `SL_DB_ID` | — | DuckLake database name |
-| `PG_HOST` | `host.docker.internal` | PostgreSQL host |
-| `PG_USERNAME` | — | PostgreSQL username |
-| `PG_PASSWORD` | — | PostgreSQL password |
-| `ACL_ENABLED` | `true` | Enable/disable ACL validation |
-| `ACL_BASE_PATH` | `/etc/gizmosql/acl` | Directory containing tenant ACL grants |
-| `ACL_TENANT` | `default` | Active ACL tenant |
-| `JWT_SECRET_KEY` | `a_very_secret_key` | JWT signing secret |
-
 ## Documentation
 
-- [Getting Started](docs/quickstart.md) — Set up and run in 5 minutes
-- [Usage Guide](docs/guide.md) — Architecture, deployment, and configuration walkthrough
-- [Configuration Reference](docs/configuration.md) — All environment variables and settings
-- [Access Control Lists](docs/acl.md) — ACL grants, tenants, and permissions
-- [Connecting from DBeaver](docs/dbeaver.md) — Step-by-step DBeaver setup
-- [Troubleshooting](docs/troubleshooting.md) — Common issues and solutions
+- [Getting Started](docs/quickstart.md) -- Set up and run in 5 minutes
+- [Usage Guide](docs/guide.md) -- Architecture, deployment, and configuration walkthrough
+- [Configuration Reference](docs/configuration.md) -- All environment variables and settings
+- [Access Control Lists](docs/acl.md) -- ACL grants, tenants, and permissions
+- [Connecting from DBeaver](docs/dbeaver.md) -- Step-by-step DBeaver setup
+- [Troubleshooting](docs/troubleshooting.md) -- Common issues and solutions
+- [Architecture Document](docs/ARCHITECTURE.md) -- Detailed system architecture
+- [Product Requirements](docs/PRD.md) -- Product requirements document
 
 ## License
 
