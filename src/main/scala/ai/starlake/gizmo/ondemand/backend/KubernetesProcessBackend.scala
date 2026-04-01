@@ -302,7 +302,22 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
         val pName = podMeta.getName
         val phase = Option(pod.getStatus).flatMap(s => Option(s.getPhase)).getOrElse("")
 
-        if phase != "Running" then
+        if Set("Failed", "Succeeded", "Unknown").contains(phase) then
+          logger.info(s"Cleaning up stale pod $pName in phase '$phase'")
+          try
+            val labels = Option(podMeta.getLabels).map(_.asScala.toMap).getOrElse(Map.empty)
+            val instanceName = labels.getOrElse("gizmo-instance", pName.stripPrefix("gizmo-proxy-"))
+            client.pods().inNamespace(ns).withName(pName).delete()
+            val sName = serviceName(instanceName)
+            client.services().inNamespace(ns).withName(sName).delete()
+            instanceExternalPorts.remove(instanceName).foreach { ep =>
+              removeNginxConfigMapEntry(ep)
+              releaseExternalPort(ep)
+            }
+          catch case e: Exception =>
+            logger.warn(s"Failed to clean up stale pod $pName: ${e.getMessage}")
+          None
+        else if phase != "Running" then
           logger.info(s"Skipping pod $pName in phase '$phase' during discovery")
           None
         else
