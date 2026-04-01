@@ -18,4 +18,5 @@ object Versions {
   val duckdb = "1.4.3.0"
   val blobstore = "0.10.1"
   val netty = "4.1.97.Final"
+  val fabric8 = "7.1.0"
 }

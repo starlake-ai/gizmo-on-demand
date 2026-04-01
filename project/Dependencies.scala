@@ -74,4 +74,7 @@ object Dependencies {
   val blobstoreS3 = "com.github.fs2-blobstore" %% "s3" % Versions.blobstore
   val blobstoreGcs = "com.github.fs2-blobstore" %% "gcs" % Versions.blobstore
   val blobstoreAzure = "com.github.fs2-blobstore" %% "azure" % Versions.blobstore
+  // Kubernetes
+  val kubernetesClient =
+    "io.fabric8" % "kubernetes-client" % Versions.fabric8
 }

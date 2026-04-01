@@ -12,7 +12,9 @@ case class GizmoOnDemandConfig(
     defaultGizmoScript: String,
     proxyScript: String,
     apiKey: Option[String],
-    idleTimeout: Int
+    idleTimeout: Int,
+    runtimeType: String,
+    kubernetes: Option[KubernetesConfig]
 )
 
 object GizmoOnDemandConfig:
