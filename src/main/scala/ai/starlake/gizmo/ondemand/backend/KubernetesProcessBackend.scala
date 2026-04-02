@@ -71,6 +71,29 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
       catch case e: Exception =>
         logger.error(s"Failed to remove nginx ConfigMap entry for port $externalPort", e)
 
+  /** Remove nginx ConfigMap entries that point to services which no longer exist */
+  private def cleanupOrphanConfigMapEntries(ns: String): Unit =
+    for
+      cmName <- config.nginxConfigMapName
+      cmNs = config.nginxConfigMapNamespace.getOrElse(ns)
+    do
+      try
+        val cm = client.configMaps().inNamespace(cmNs).withName(cmName).get()
+        if cm != null && cm.getData != null then
+          val entries = cm.getData.asScala.toMap
+          entries.foreach { case (port, target) =>
+            // target format: "namespace/serviceName:port"
+            val svcName = target.split("/").lastOption.flatMap(_.split(":").headOption).getOrElse("")
+            val svc = client.services().inNamespace(ns).withName(svcName).get()
+            if svc == null then
+              logger.info(s"Removing orphan nginx ConfigMap entry: port $port -> $target (service $svcName not found)")
+              val op: java.util.function.UnaryOperator[ConfigMap] = c => { c.getData.remove(port); c }
+              client.configMaps().inNamespace(cmNs).withName(cmName).edit(op)
+              port.toIntOption.foreach(releaseExternalPort)
+          }
+      catch case e: Exception =>
+        logger.warn(s"Failed to cleanup orphan ConfigMap entries: ${e.getMessage}")
+
   private def buildPod(
       pName: String,
       ns: String,
@@ -297,7 +320,7 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
         .asScala
         .toList
 
-      pods.flatMap { pod =>
+      val discovered = pods.flatMap { pod =>
         val podMeta = pod.getMetadata
         val pName = podMeta.getName
         val phase = Option(pod.getStatus).flatMap(s => Option(s.getPhase)).getOrElse("")
@@ -372,6 +395,11 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
             logger.info(s"Discovered existing pod $pName (instance=$instanceName, port=$proxyPort, externalPort=${externalPort.getOrElse("none")})")
             Some(DiscoveredProcess(instanceName, handle, host, proxyPort, backendPort, arguments, config.externalHost, externalPort))
       }
+
+      // Clean up orphan nginx ConfigMap entries pointing to non-existent services
+      cleanupOrphanConfigMapEntries(ns)
+
+      discovered
     catch
       case e: Exception =>
         logger.error("Failed to discover existing K8s pods", e)
