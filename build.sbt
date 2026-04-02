@@ -6,6 +6,21 @@ lazy val root = (project in file("."))
   .settings(
     name := "gizmo-on-demand",
     resolvers ++= Resolvers.allResolvers,
+    // Force Netty version compatible with Arrow 14.0.1 (requires PoolArena.chunkSize).
+    // Fabric8 K8s client pulls Netty 4.1.117 via Vert.x, which removed this field.
+    dependencyOverrides ++= Seq(
+      "io.netty" % "netty-buffer" % "4.1.96.Final",
+      "io.netty" % "netty-common" % "4.1.96.Final",
+      "io.netty" % "netty-handler" % "4.1.96.Final",
+      "io.netty" % "netty-transport" % "4.1.96.Final",
+      "io.netty" % "netty-codec" % "4.1.96.Final",
+      "io.netty" % "netty-codec-http" % "4.1.96.Final",
+      "io.netty" % "netty-codec-http2" % "4.1.96.Final",
+      "io.netty" % "netty-codec-socks" % "4.1.96.Final",
+      "io.netty" % "netty-handler-proxy" % "4.1.96.Final",
+      "io.netty" % "netty-resolver" % "4.1.96.Final",
+      "io.netty" % "netty-transport-native-unix-common" % "4.1.96.Final"
+    ),
     libraryDependencies ++= Seq(
       Dependencies.tapirCore,
       Dependencies.tapirJdkHttpServer,
@@ -62,6 +77,7 @@ lazy val root = (project in file("."))
         xs match {
           case "MANIFEST.MF" :: Nil => MergeStrategy.discard
           case "services" :: _      => MergeStrategy.concat
+          case "vertx" :: _         => MergeStrategy.first
           case _                    => MergeStrategy.discard
         }
       case "module-info.class"       => MergeStrategy.discard

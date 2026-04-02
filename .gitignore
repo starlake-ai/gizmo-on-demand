@@ -47,4 +47,6 @@ build/
 .bsp/
 logs
 certs
-distrib
+distrib.bloop
+project/.bloop
+project/project/.bloop

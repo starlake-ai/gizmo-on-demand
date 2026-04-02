@@ -12,7 +12,9 @@ case class ManagedProcess(
     backendPort: Int,
     handle: ProcessHandle,
     host: String,
-    arguments: Map[String, String]
+    arguments: Map[String, String],
+    externalHost: Option[String] = None,
+    externalPort: Option[Int] = None
 )
 
 /** Process manager that handles lifecycle of processes */
@@ -39,7 +41,9 @@ class ProcessManager(backend: ProcessBackend) extends LazyLogging:
         backendPort = dp.backendPort,
         handle = dp.handle,
         host = dp.host,
-        arguments = dp.arguments
+        arguments = dp.arguments,
+        externalHost = dp.externalHost,
+        externalPort = dp.externalPort
       )
       processes.putIfAbsent(dp.name, managedProcess) match
         case Some(_) =>
@@ -131,7 +135,9 @@ class ProcessManager(backend: ProcessBackend) extends LazyLogging:
                   backendPort,
                   spawnResult.handle,
                   spawnResult.host,
-                  arguments
+                  arguments,
+                  externalHost = spawnResult.externalHost,
+                  externalPort = spawnResult.externalPort
                 )
 
                 processes.putIfAbsent(processName, managedProcess) match
@@ -152,7 +158,9 @@ class ProcessManager(backend: ProcessBackend) extends LazyLogging:
                         port = spawnResult.port,
                         message =
                           s"Proxy Process started successfully on port ${spawnResult.port}",
-                        host = Some(spawnResult.host)
+                        host = Some(spawnResult.host),
+                        externalHost = spawnResult.externalHost,
+                        externalPort = spawnResult.externalPort
                       )
                     )
 
@@ -190,7 +198,9 @@ class ProcessManager(backend: ProcessBackend) extends LazyLogging:
         port = mp.port,
         pid = mp.handle.pid,
         status = if backend.isAlive(mp.handle) then "running" else "stopped",
-        host = Some(mp.host)
+        host = Some(mp.host),
+        externalHost = mp.externalHost,
+        externalPort = mp.externalPort
       )
     }.toList
     ListProcessesResponse(processInfos)
