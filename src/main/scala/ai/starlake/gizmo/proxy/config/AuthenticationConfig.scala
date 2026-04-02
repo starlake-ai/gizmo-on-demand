@@ -10,7 +10,8 @@ case class DatabaseAuthConfig(
     usersTable: String,
     usernameColumn: String,
     passwordColumn: String,
-    roleColumn: String
+    roleColumn: String,
+    query: String
 ) derives ConfigReader
 
 case class KeycloakAuthConfig(
