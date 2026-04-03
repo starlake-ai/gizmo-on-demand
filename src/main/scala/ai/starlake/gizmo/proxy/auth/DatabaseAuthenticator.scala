@@ -8,12 +8,9 @@ import com.zaxxer.hikari.{HikariConfig, HikariDataSource}
 /** Authenticates username/password against a PostgreSQL database.
   * Passwords must be stored as BCrypt hashes.
   *
-  * Two modes:
-  *   - Table mode (default): builds a query from usersTable/column config.
-  *   - Custom query mode: uses a user-provided SQL query.
-  *     The query must return two columns (password_hash, role) and
-  *     use `?` as the placeholder for the username parameter.
-  *     Example: `SELECT password_hash, role FROM my_view WHERE email = ?`
+  * The query must return two columns (password_hash, role) and use `?`
+  * as the placeholder for the username parameter.
+  * Default: `SELECT password, role FROM users WHERE username = ?`
   */
 class DatabaseAuthenticator(config: DatabaseAuthConfig, roleClaim: String)
     extends BasicAuthProvider,
@@ -31,9 +28,7 @@ class DatabaseAuthenticator(config: DatabaseAuthConfig, roleClaim: String)
     hc.setConnectionTimeout(5000)
     new HikariDataSource(hc)
 
-  private val query: String =
-    if config.query.nonEmpty then config.query
-    else s"SELECT ${config.passwordColumn}, ${config.roleColumn} FROM ${config.usersTable} WHERE ${config.usernameColumn} = ?"
+  private val query: String = config.query
 
   override def authenticate(
       username: String,

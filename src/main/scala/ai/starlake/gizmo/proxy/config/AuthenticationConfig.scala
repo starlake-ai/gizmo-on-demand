@@ -7,10 +7,6 @@ case class DatabaseAuthConfig(
     jdbcUrl: String,
     username: String,
     password: String,
-    usersTable: String,
-    usernameColumn: String,
-    passwordColumn: String,
-    roleColumn: String,
     query: String
 ) derives ConfigReader
 

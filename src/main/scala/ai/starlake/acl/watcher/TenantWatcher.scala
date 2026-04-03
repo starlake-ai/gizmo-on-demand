@@ -69,7 +69,7 @@ final class TenantWatcher(
 
   private def initializeWatcher(): Unit =
     // Wait for basePath with a bounded retry (3 attempts, 3s apart)
-    val maxWaitAttempts = 3
+    val maxWaitAttempts = 10
     var waitAttempt = 0
     while running.get() && !Files.exists(basePath) do
       waitAttempt += 1
