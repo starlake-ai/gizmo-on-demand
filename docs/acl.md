@@ -270,15 +270,29 @@ A query touching multiple tables requires the user to have access to **ALL** ref
 
 ### DuckDB Name Resolution
 
-When the ACL dialect is `duckdb`, two-part table names in SQL queries are resolved differently from standard SQL:
+When the ACL dialect is `duckdb`, unqualified or partially qualified table names are resolved using the default database (`SL_DB_ID`) and default schema (`main` for DuckDB):
 
 | SQL name | DuckDB resolution | Standard SQL resolution |
 |----------|-------------------|------------------------|
-| `orders` | `{defaultDatabase}.main.orders` | `{defaultDatabase}.{defaultSchema}.orders` |
-| `tpch2.orders` | `tpch2.main.orders` (catalog-first) | `{defaultDatabase}.tpch2.orders` (schema-first) |
-| `tpch2.main.orders` | `tpch2.main.orders` | `tpch2.main.orders` |
+| SQL in query | Resolved to (DuckDB) | Example with `SL_DB_ID=warehouse` |
+|----------|-------------------|------------------------|
+| `orders` | `{SL_DB_ID}.main.orders` | `warehouse.main.orders` |
+| `tpch2.orders` | `tpch2.main.orders` (catalog-first) | `tpch2.main.orders` |
+| `tpch2.main.orders` | `tpch2.main.orders` (already qualified) | `tpch2.main.orders` |
 
 DuckDB interprets two-part names as `catalog.table` (not `schema.table`), using `main` as the default schema. This matches DuckDB's own behavior: *"When providing partial qualifications, DuckDB attempts to resolve the reference as either a catalog or a schema."*
+
+The grant target must match the **resolved** name. For example, if `SL_DB_ID=warehouse` and the query is `SELECT * FROM orders`, the grant must target `warehouse.main.orders` (or `warehouse.main` or `warehouse` for broader access).
+
+**Important:** Grant target resolution is different from SQL query resolution. In grant YAML files, a single identifier always means a **database**, not a table:
+
+| Grant target | Interpreted as | Scope |
+|---|---|---|
+| `warehouse` | Database `warehouse` | All schemas and tables in the database |
+| `warehouse.main` | Schema `warehouse.main` | All tables in the schema |
+| `warehouse.main.orders` | Table `warehouse.main.orders` | Single table |
+
+To grant access to a specific table, you must always use the three-part `database.schema.table` form in the YAML.
 
 **Recommendation:** Always use fully qualified three-part names (`database.schema.table`) in both SQL queries and grant targets to avoid ambiguity.
 

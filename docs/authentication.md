@@ -233,7 +233,45 @@ TOKEN=$(gcloud auth print-identity-token --audiences=123456789.apps.googleuserco
 ### Username and role
 
 - **Username:** extracted from the `email` claim (e.g., `alice@company.com`).
-- **Role:** Google tokens do not include a `role` claim, so the default role is `user`. To assign roles, combine with [database authentication](#combining-multiple-providers).
+- **Role:** Google tokens do not include a `role` claim, so the default role is `user`. To assign roles, use Google Workspace groups lookup (below) or combine with [database authentication](#combining-multiple-providers).
+
+### Google Workspace groups lookup (optional)
+
+Google tokens don't contain group memberships. If you use Google Workspace, the proxy can fetch a user's groups via the Directory API and use them for ACL matching.
+
+**Prerequisites:**
+
+1. Create a **service account** in Google Cloud with domain-wide delegation.
+2. In the Google Workspace admin console, grant the service account the scope `https://www.googleapis.com/auth/admin.directory.group.readonly`.
+3. Download the service account JSON key file.
+
+**Configuration:**
+
+```bash
+export AUTH_GOOGLE_GROUPS_LOOKUP=true
+export AUTH_GOOGLE_SERVICE_ACCOUNT_KEY_PATH=/path/to/service-account.json
+
+# Optional: cache TTL in seconds (default: 300 = 5 minutes)
+export AUTH_GOOGLE_GROUPS_CACHE_TTL=300
+```
+
+**How it works:**
+
+1. User authenticates with a Google Bearer token.
+2. Proxy validates the token via Google's JWKS.
+3. Proxy calls `GET https://admin.googleapis.com/admin/directory/v1/groups?userKey={email}`.
+4. Group email addresses (e.g., `analysts@company.com`) are added to the user's groups set.
+5. Groups are cached per user for the configured TTL (default 5 minutes).
+6. ACL grants can match against these groups:
+
+```yaml
+grants:
+  - target: warehouse.analytics
+    principals:
+      - group:analysts@company.com
+```
+
+When groups lookup is disabled (default), Google-authenticated users have no groups unless combined with database auth for role mapping.
 
 ---
 
@@ -552,6 +590,9 @@ The proxy checks claims in this order:
 | `AUTH_GOOGLE_ENABLED` | `false` | Enable Google OAuth authentication |
 | `AUTH_GOOGLE_CLIENT_ID` | (empty) | Google OAuth client ID |
 | `AUTH_GOOGLE_CLIENT_SECRET` | (empty) | Google OAuth client secret |
+| `AUTH_GOOGLE_GROUPS_LOOKUP` | `false` | Enable Google Workspace group membership lookup via Directory API |
+| `AUTH_GOOGLE_SERVICE_ACCOUNT_KEY_PATH` | (empty) | Path to service account JSON key file with Directory API access |
+| `AUTH_GOOGLE_GROUPS_CACHE_TTL` | `300` | Cache TTL for group memberships in seconds |
 
 ### Azure AD
 

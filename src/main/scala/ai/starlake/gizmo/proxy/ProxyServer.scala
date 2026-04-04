@@ -114,11 +114,12 @@ object ProxyServer extends LazyLogging:
     // Initialize authentication service if any providers are configured
     val authConfig = config.authentication
     val authService: Option[AuthenticationService] =
-      if authConfig.providers.nonEmpty || authConfig.database.enabled ||
+      if authConfig.database.enabled ||
         authConfig.keycloak.enabled || authConfig.google.enabled ||
-        authConfig.azure.enabled || authConfig.aws.enabled
+        authConfig.azure.enabled || authConfig.aws.enabled ||
+        authConfig.jwt.secretKey.nonEmpty || authConfig.jwt.publicKeyPath.nonEmpty
       then
-        logger.info(s"Initializing authentication service (providers: ${authConfig.providers})")
+        logger.info("Initializing authentication service")
         Some(new AuthenticationService(authConfig, config.session))
       else
         logger.info("No authentication providers configured, using legacy auth (hardcoded admin role)")

@@ -66,10 +66,13 @@ Two runtime backends are available (set `SL_GIZMO_RUNTIME_TYPE`):
 ### Features
 
 - **Multi-tenant on-demand provisioning** via REST API
+- **Multi-backend authentication** -- PostgreSQL database, Keycloak, Google, Azure AD, AWS Cognito, or custom JWT
+- **Browser-based OAuth/SSO** for ADBC and CLI clients (`__discover__` flow)
+- **Google Workspace groups lookup** via Directory API with per-user TTL cache
 - **SQL statement validation** -- blocks DROP, configurable allow/deny
 - **Table-level ACL** with hierarchical grants (database -> schema -> table)
 - **Multi-tenant ACL** with folder-based isolation and hot-reload via file watcher
-- **JWT authentication** with group-based permissions
+- **Role-based access** with configurable JWT claim extraction (role, groups, realm_access)
 - **TLS encryption** -- auto-generated self-signed certificates for development
 - **DuckLake integration** with PostgreSQL metadata
 - **Optional S3 storage** for data files
@@ -155,7 +158,13 @@ Once a proxy is running, connect with any Apache Arrow Flight SQL client (JDBC, 
 jdbc:arrow-flight-sql://localhost:11900?useEncryption=true&disableCertificateVerification=true
 ```
 
-**Authentication:** Provide `GIZMOSQL_USERNAME` / `GIZMOSQL_PASSWORD` as the JDBC username/password. The proxy issues a JWT token on first authentication and accepts it for subsequent requests.
+**Authentication:** The proxy supports multiple authentication methods:
+
+- **Username/Password** -- validated against a PostgreSQL database, Keycloak (ROPC), Azure AD (ROPC), or the legacy `GIZMOSQL_USERNAME`/`GIZMOSQL_PASSWORD` env vars.
+- **Bearer Token** -- JWT tokens from Keycloak, Google, Azure AD, AWS Cognito, or a custom issuer are validated against the provider's public keys (JWKS).
+- **Browser-based SSO** -- ADBC/CLI clients can use `auth_type="external"` for a browser-based OAuth login flow.
+
+See the [Authentication Guide](docs/authentication.md) for detailed setup instructions per provider.
 
 ## API Reference
 
@@ -333,6 +342,25 @@ When DuckLake files are stored in S3-compatible storage, pass these as additiona
 | `AWS_REGION` | S3 region |
 | `AWS_ENDPOINT` | S3 endpoint URL (for MinIO or compatible services) |
 
+### Authentication
+
+The proxy supports configurable authentication backends. When no provider is enabled, credentials are validated against `GIZMOSQL_USERNAME`/`GIZMOSQL_PASSWORD`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `JWT_SECRET_KEY` | `a_very_secret_key` | Shared secret between proxy and backend (must match) |
+| `AUTH_DB_ENABLED` | `false` | Enable PostgreSQL database authentication |
+| `AUTH_DB_JDBC_URL` | `jdbc:postgresql://localhost:5432/gizmosql_auth` | JDBC connection URL |
+| `AUTH_DB_QUERY` | `SELECT password, role FROM users WHERE username = ?` | SQL query returning (bcrypt_hash, role) |
+| `AUTH_KEYCLOAK_ENABLED` | `false` | Enable Keycloak authentication |
+| `AUTH_GOOGLE_ENABLED` | `false` | Enable Google OAuth authentication |
+| `AUTH_AZURE_ENABLED` | `false` | Enable Azure AD authentication |
+| `AUTH_AWS_ENABLED` | `false` | Enable AWS Cognito authentication |
+| `AUTH_ROLE_CLAIM` | `role` | JWT claim name for role extraction |
+| `AUTH_OAUTH_ENABLED` | `false` | Enable browser-based OAuth/SSO for ADBC clients |
+
+For complete configuration options per provider, see the [Authentication Guide](docs/authentication.md).
+
 ### SQL Validation
 
 | Variable | Default | Description |
@@ -347,11 +375,11 @@ Default rules: `SELECT`, `INSERT`, and `UPDATE` (with `WHERE`) are allowed. `DRO
 
 | Variable | Default | Description |
 |---|---|---|
-| `ACL_ENABLED` | `true` | Enable/disable ACL validation |
+| `ACL_ENABLED` | `false` | Enable/disable ACL validation |
 | `ACL_BASE_PATH` | `/etc/gizmosql/acl` | Directory containing tenant ACL grants |
 | `ACL_TENANT` | `default` | Active ACL tenant |
 
-ACL grants are defined in YAML files and support hierarchical permissions (database -> schema -> table) with multi-tenant folder-based isolation. Grant files are hot-reloaded via a file watcher.
+ACL grants are defined in YAML files and support hierarchical permissions (database -> schema -> table) with multi-tenant folder-based isolation. Grant files are hot-reloaded via a file watcher. ACL is disabled by default -- set `ACL_ENABLED=true` to enable. If the base path does not exist, all queries are allowed through.
 
 ## Idle Timeout
 
@@ -397,6 +425,7 @@ make docker-logs    # Tail container logs
 
 ## Documentation
 
+- [Authentication Guide](docs/authentication.md) -- Multi-backend auth setup (DB, Keycloak, Google, Azure, AWS, OAuth/SSO)
 - [Getting Started](docs/quickstart.md) -- Set up and run in 5 minutes
 - [Usage Guide](docs/guide.md) -- Architecture, deployment, and configuration walkthrough
 - [Configuration Reference](docs/configuration.md) -- All environment variables and settings

@@ -25,7 +25,7 @@ class AuthenticationService(config: AuthenticationConfig, sessionConfig: Session
     if config.oauth.enabled &&
       (config.keycloak.enabled || config.google.enabled || config.azure.enabled)
     then
-      val server = new OAuthHttpServer(config.oauth, config, config.jwt.secretKey)
+      val server = new OAuthHttpServer(config.oauth, config, sessionConfig.jwtSecretKey)
       server.start()
       Some(server)
     else None
@@ -99,12 +99,8 @@ class AuthenticationService(config: AuthenticationConfig, sessionConfig: Session
         config.keycloak.clientId, config.keycloak.clientSecret,
         config.roleClaim
       )
-    if config.google.enabled then
-      providers += new ResourceOwnerPasswordAuthenticator(
-        "google", "https://oauth2.googleapis.com/token",
-        config.google.clientId, config.google.clientSecret,
-        config.roleClaim
-      )
+    // Google does not support ROPC (grant_type=password) — no basic auth provider for Google.
+    // Google users must authenticate via Bearer token or browser-based OAuth/SSO.
     if config.azure.enabled then
       val tokenEndpoint =
         s"https://login.microsoftonline.com/${config.azure.tenantId}/oauth2/v2.0/token"
@@ -113,10 +109,14 @@ class AuthenticationService(config: AuthenticationConfig, sessionConfig: Session
         config.azure.clientId, config.azure.clientSecret,
         config.roleClaim
       )
-    // Only add GIZMOSQL_USERNAME/PASSWORD fallback when no other basic provider is configured
+    // Only add GIZMOSQL_USERNAME/PASSWORD fallback when no external auth provider is configured at all
+    // (neither basic nor bearer). If any provider is enabled (even bearer-only like Google), skip the fallback.
     val otherProviders = providers.result()
-    if otherProviders.isEmpty && sessionConfig.gizmosqlUsername.nonEmpty then
-      logger.info("No external basic auth providers configured, using env-var authenticator (GIZMOSQL_USERNAME/PASSWORD)")
+    val anyProviderEnabled = config.database.enabled || config.keycloak.enabled ||
+      config.google.enabled || config.azure.enabled || config.aws.enabled ||
+      config.jwt.secretKey.nonEmpty || config.jwt.publicKeyPath.nonEmpty
+    if !anyProviderEnabled && sessionConfig.gizmosqlUsername.nonEmpty then
+      logger.info("No external auth providers configured, using env-var authenticator (GIZMOSQL_USERNAME/PASSWORD)")
       otherProviders :+ new EnvVarAuthenticator(sessionConfig.gizmosqlUsername, sessionConfig.gizmosqlPassword)
     else
       otherProviders

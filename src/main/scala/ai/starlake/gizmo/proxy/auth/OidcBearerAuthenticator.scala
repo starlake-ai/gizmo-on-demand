@@ -21,7 +21,8 @@ class OidcBearerAuthenticator(
     jwksUrl: String,
     expectedIssuer: String,
     expectedAudience: String,
-    roleClaim: String
+    roleClaim: String,
+    groupsLookup: Option[String => Set[String]] = None
 ) extends BearerAuthProvider,
       LazyLogging:
 
@@ -69,7 +70,16 @@ class OidcBearerAuthenticator(
 
       val username = extractUsername(claims)
       val role = RoleExtractor.extract(claims, roleClaim)
-      val groups = RoleExtractor.extractGroups(claims, "groups")
+      var groups = RoleExtractor.extractGroups(claims, "groups")
+
+      // Enrich groups from external lookup (e.g., Google Directory API)
+      groupsLookup.foreach { lookup =>
+        val email = Option(claims.getStringClaim("email")).getOrElse(username)
+        val externalGroups = lookup(email)
+        if externalGroups.nonEmpty then
+          logger.debug(s"Enriched groups for $email from $providerName directory: $externalGroups")
+          groups = groups ++ externalGroups
+      }
 
       Right(
         AuthenticatedProfile(

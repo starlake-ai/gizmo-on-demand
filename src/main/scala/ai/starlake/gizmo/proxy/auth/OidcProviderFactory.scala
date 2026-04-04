@@ -13,12 +13,18 @@ object OidcProviderFactory:
     new OidcBearerAuthenticator("keycloak", jwksUrl, issuer, config.clientId, roleClaim)
 
   def createGoogle(config: GoogleAuthConfig, roleClaim: String): OidcBearerAuthenticator =
+    val lookup: Option[String => Set[String]] =
+      if config.groupsLookup && config.serviceAccountKeyPath.nonEmpty then
+        val client = new GoogleGroupsLookup(config.serviceAccountKeyPath, config.groupsCacheTtlSeconds)
+        Some(client.getGroupsForUser)
+      else None
     new OidcBearerAuthenticator(
       "google",
       "https://www.googleapis.com/oauth2/v3/certs",
       "https://accounts.google.com",
       config.clientId,
-      roleClaim
+      roleClaim,
+      lookup
     )
 
   def createAzure(config: AzureAuthConfig, roleClaim: String): OidcBearerAuthenticator =

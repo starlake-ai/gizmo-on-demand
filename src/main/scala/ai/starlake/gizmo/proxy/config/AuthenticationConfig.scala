@@ -21,7 +21,10 @@ case class KeycloakAuthConfig(
 case class GoogleAuthConfig(
     enabled: Boolean,
     clientId: String,
-    clientSecret: String
+    clientSecret: String,
+    groupsLookup: Boolean,
+    serviceAccountKeyPath: String,
+    groupsCacheTtlSeconds: Long
 ) derives ConfigReader
 
 case class AzureAuthConfig(
@@ -55,7 +58,6 @@ case class OAuthConfig(
 ) derives ConfigReader
 
 case class AuthenticationConfig(
-    providers: List[String],
     roleClaim: String,
     database: DatabaseAuthConfig,
     keycloak: KeycloakAuthConfig,
