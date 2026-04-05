@@ -24,4 +24,5 @@ object Versions {
   val nimbusJoseJwt = "9.47"
   val hikariCp = "6.2.1"
   val jbcrypt = "0.10.2"
+  val postgresql = "42.7.4"
 }

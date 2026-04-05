@@ -92,7 +92,8 @@ lazy val root = (project in file("."))
       // Authentication
       Dependencies.nimbusJoseJwt,
       Dependencies.hikariCp,
-      Dependencies.jbcrypt
+      Dependencies.jbcrypt,
+      Dependencies.postgresql
     ),
     assembly / assemblyMergeStrategy := {
       case PathList("META-INF", "versions", "9", "module-info.class") =>

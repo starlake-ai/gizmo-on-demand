@@ -82,4 +82,5 @@ object Dependencies {
   val nimbusJoseJwt = "com.nimbusds" % "nimbus-jose-jwt" % Versions.nimbusJoseJwt
   val hikariCp = "com.zaxxer" % "HikariCP" % Versions.hikariCp
   val jbcrypt = "at.favre.lib" % "bcrypt" % Versions.jbcrypt
+  val postgresql = "org.postgresql" % "postgresql" % Versions.postgresql
 }

@@ -408,8 +408,14 @@ object FlightSqlProxy:
           java.util.Optional.of(username)
         else java.util.Optional.empty()
 
-  class AuthMiddleware(username: String, jwtSecretKey: String, oauthUrl: Option[String] = None)
-      extends FlightServerMiddleware
+  class AuthMiddleware(
+      username: String,
+      jwtSecretKey: String,
+      role: String = "admin",
+      groups: List[String] = Nil,
+      authMethod: String = "Basic",
+      oauthUrl: Option[String] = None
+  ) extends FlightServerMiddleware
       with LazyLogging:
     override def onBeforeSendingHeaders(outgoingHeaders: CallHeaders): Unit =
       oauthUrl match
@@ -421,7 +427,7 @@ object FlightSqlProxy:
         case None =>
           outgoingHeaders.insert(
             "authorization",
-            s"Bearer ${AuthMiddleware.createJWTToken(username, jwtSecretKey)}"
+            s"Bearer ${AuthMiddleware.createJWTToken(username, jwtSecretKey, role, groups, authMethod)}"
           )
 
     override def onCallCompleted(status: CallStatus): Unit =
@@ -500,7 +506,7 @@ object FlightSqlProxy:
               case Some(oauthUrl) =>
                 logger.info(s"Discovery via Basic auth: returning OAuth URL $oauthUrl")
                 FlightSqlProxy.currentUsername.set("__discover__")
-                return new AuthMiddleware("__discover__", config.session.jwtSecretKey, Some(oauthUrl))
+                return new AuthMiddleware("__discover__", config.session.jwtSecretKey, oauthUrl = Some(oauthUrl))
               case None =>
                 throw CallStatus.UNAUTHENTICATED
                   .withDescription("OAuth is not enabled on this server")
@@ -557,7 +563,7 @@ object FlightSqlProxy:
             )
           )
           FlightSqlProxy.currentUsername.set(authenticatedUsername)
-          new AuthMiddleware(authenticatedUsername, config.session.jwtSecretKey)
+          new AuthMiddleware(authenticatedUsername, config.session.jwtSecretKey, role, groups, authMethod)
         else if authHeader.startsWith("Bearer ") then
           val token = authHeader.substring(7)
           // First try self-issued JWT verification (existing behavior)
@@ -568,6 +574,10 @@ object FlightSqlProxy:
               .build()
               .verify(token)
             val username = decodedJWT.getClaim("sub").asString()
+            val jwtRole = Option(decodedJWT.getClaim("role")).flatMap(c => Option(c.asString())).getOrElse("admin")
+            val jwtGroups = Option(decodedJWT.getClaim("groups")).flatMap(c => Option(c.asList(classOf[String])))
+              .map(_.asScala.toList).getOrElse(Nil)
+            val jwtAuthMethod = Option(decodedJWT.getClaim("auth_method")).flatMap(c => Option(c.asString())).getOrElse("Basic")
             FlightSqlProxy.currentClaims.set(decodedJWT.getClaims.asScala.toMap)
 
             if !backendClients.containsKey(username) then
@@ -583,7 +593,7 @@ object FlightSqlProxy:
               )
 
             FlightSqlProxy.currentUsername.set(username)
-            new AuthMiddleware(username, config.session.jwtSecretKey)
+            new AuthMiddleware(username, config.session.jwtSecretKey, jwtRole, jwtGroups, jwtAuthMethod)
           catch
             case _: Exception =>
               // Not a self-issued token — try external providers
@@ -614,7 +624,8 @@ object FlightSqlProxy:
                         )
                       )
                       FlightSqlProxy.currentUsername.set(profile.username)
-                      new AuthMiddleware(profile.username, config.session.jwtSecretKey)
+                      new AuthMiddleware(profile.username, config.session.jwtSecretKey,
+                        profile.role, profile.groups.toList, profile.authMethod)
                     case Left(error) =>
                       throw CallStatus.UNAUTHENTICATED
                         .withDescription(s"Bearer authentication failed: $error")
