@@ -219,7 +219,7 @@ grants:
 
 | Field | Required | Default | Description |
 |---|---|---|---|
-| `mode` | No | `strict` | Resolution mode: `strict` (unknown tables denied) or `permissive` (unknown tables allowed) |
+| `mode` | No | `strict` | Resolution mode: `strict` (unknown tables denied), `permissive` (unknown tables allowed), or `defaultAllow` (allow all, restrict only granted tables) |
 | `grants` | Yes | — | List of grant rules |
 | `grants[].target` | Yes | — | Dot-separated target: `database`, `database.schema`, or `database.schema.table` |
 | `grants[].principals` | Yes | — | List of principals: `user:name` or `group:name` (at least one required) |
@@ -332,23 +332,61 @@ If Alice belongs to the `analysts` group, she can access `table1` (direct grant)
 
 ## Resolution Modes
 
-The resolution mode controls behavior when a table or view cannot be identified by the view resolver.
+The resolution mode controls how access decisions are made for tables that are not explicitly covered by a grant.
 
-| Situation | Strict Mode | Permissive Mode |
-|---|---|---|
-| Known table with matching grant | Allowed | Allowed |
-| Known table without matching grant | Denied | Denied |
-| Unknown table/view | **Denied** | **Allowed** (with warning) |
+### Strict (default)
+
+All tables must have a matching grant. Unknown tables are denied.
 
 ```yaml
-mode: strict      # Default — unknown tables are denied
+mode: strict
 ```
+
+### Permissive
+
+Same as strict, but unknown tables (those the view resolver cannot identify) are allowed with a warning.
 
 ```yaml
-mode: permissive  # Unknown tables are allowed (with a warning logged)
+mode: permissive
 ```
 
-**Recommendation**: Use `strict` mode in production to prevent accidental access to unrecognized resources.
+### DefaultAllow
+
+Inverts the access model: tables **without** any grant are allowed for everyone. Tables **with** a grant are restricted to the listed principals only. This enables a "deny-by-exception" pattern where you only define grants for tables you want to restrict.
+
+```yaml
+mode: defaultAllow
+```
+
+**Example** — allow all tables except `partsupp`:
+
+```yaml
+mode: defaultAllow
+grants:
+  - target: warehouse.tpch.partsupp
+    principals:
+      - group:admin   # Only admins can access partsupp; all other tables are open
+```
+
+In this example:
+- `warehouse.tpch.partsupp` has a grant → only `group:admin` can access it.
+- `warehouse.tpch.customer`, `warehouse.tpch.orders`, etc. have no grants → allowed for everyone.
+
+> **Important**: In `defaultAllow` mode, a grant **allows** access to the listed principals — it does not deny them. To block a group from a table, create a grant for that table with a **different** principal (one the blocked group does not belong to).
+
+### Comparison
+
+| Situation | Strict | Permissive | DefaultAllow |
+|---|---|---|---|
+| Table with matching grant | Allowed | Allowed | Allowed |
+| Table with grant, user not matched | Denied | Denied | **Denied** |
+| Table with no grant at all | Denied | Denied | **Allowed** |
+| Unknown table/view (not in catalog) | Denied | Allowed (warning) | Grant enforced if exists, otherwise **Allowed** |
+
+**Recommendations**:
+- Use `strict` in production for maximum security.
+- Use `defaultAllow` when you want open access with a few restricted tables.
+- Use `permissive` only during development when catalog resolution is unreliable.
 
 ## Opaque Views (authorized grants)
 
@@ -625,6 +663,36 @@ grants:
       - user:external-auditor
     expires: "2026-06-30T23:59:59Z"
 ```
+
+### Open Access with Restricted Tables (defaultAllow)
+
+```
+acl/default/grants.yaml
+```
+
+```yaml
+mode: defaultAllow
+
+grants:
+  # Only admins can access sensitive financial data
+  - target: warehouse.finance.salary_data
+    principals:
+      - group:admin
+
+  # Only HR can access employee records
+  - target: warehouse.hr.employees
+    principals:
+      - group:hr
+      - group:admin
+
+  # Temporary contractor access to a specific table
+  - target: warehouse.public.audit_logs
+    principals:
+      - user:auditor@external.com
+    expires: "2026-06-30T23:59:59Z"
+```
+
+In this configuration, all tables are accessible to everyone **except** `salary_data`, `employees`, and `audit_logs`, which are restricted to the listed principals.
 
 ### Multi-File Organization
 
