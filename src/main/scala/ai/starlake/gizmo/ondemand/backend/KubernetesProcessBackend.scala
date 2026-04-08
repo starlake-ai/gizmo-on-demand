@@ -136,6 +136,41 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     backendContainerPort.setName("backend")
     backendContainerPort.setProtocol("TCP")
 
+    // Resource limits
+    val resourceRequirements = new ResourceRequirements()
+    resourceRequirements.setRequests(Map(
+      "cpu"    -> new Quantity(config.resourceRequestsCpu),
+      "memory" -> new Quantity(config.resourceRequestsMemory)
+    ).asJava)
+    resourceRequirements.setLimits(Map(
+      "cpu"    -> new Quantity(config.resourceLimitsCpu),
+      "memory" -> new Quantity(config.resourceLimitsMemory)
+    ).asJava)
+
+    // Health check action (shared by probes) — uses HTTPGet on the health endpoint
+    val healthAction = new HTTPGetAction()
+    healthAction.setPath(config.healthCheckPath)
+    healthAction.setPort(new IntOrString(config.healthCheckPort))
+
+    // Startup probe — generous: allows slow DuckDB/DuckLake ATTACH on cold start
+    val startupProbe = new Probe()
+    startupProbe.setHttpGet(healthAction)
+    startupProbe.setInitialDelaySeconds(5)
+    startupProbe.setPeriodSeconds(2)
+    startupProbe.setFailureThreshold(30) // 5 + 30*2 = 65s max startup
+
+    // Readiness probe
+    val readinessProbe = new Probe()
+    readinessProbe.setHttpGet(healthAction)
+    readinessProbe.setPeriodSeconds(5)
+    readinessProbe.setFailureThreshold(3)
+
+    // Liveness probe
+    val livenessProbe = new Probe()
+    livenessProbe.setHttpGet(healthAction)
+    livenessProbe.setPeriodSeconds(10)
+    livenessProbe.setFailureThreshold(6)
+
     // Container — run ProxyServer directly, not the Process Manager
     val container = new Container()
     container.setName("gizmo-proxy")
@@ -146,6 +181,10 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     ))
     container.setEnv(containerEnvVars)
     container.setPorts(java.util.List.of(proxyContainerPort, backendContainerPort))
+    container.setStartupProbe(startupProbe)
+    container.setReadinessProbe(readinessProbe)
+    container.setLivenessProbe(livenessProbe)
+    container.setResources(resourceRequirements)
 
     // Mount shared PVC for DuckLake data files
     config.volumeClaimName.foreach { pvcName =>
