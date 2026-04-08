@@ -208,7 +208,7 @@ class DuckLakeCatalogResolver(
       pgSecret,
       s3SecretSql,
       ducklakeSecret,
-      s"ATTACH IF NOT EXISTS 'ducklake:$dbId' AS $quotedDbId (READ_ONLY)",
+      s"ATTACH IF NOT EXISTS 'ducklake:$dbId' AS $quotedDbId (READ_ONLY, AUTOMATIC_MIGRATION TRUE)",
       s"USE $quotedDbId"
     ).filter(_.nonEmpty)
 

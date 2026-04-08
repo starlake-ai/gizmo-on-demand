@@ -32,7 +32,7 @@ object AclError:
     def message: String = "ACL policy must contain at least one grant"
 
   case class InvalidMode(value: String) extends AclError:
-    def message: String = s"Invalid resolution mode '$value': must be 'strict' or 'permissive'"
+    def message: String = s"Invalid resolution mode '$value': must be 'strict', 'permissive', or 'defaultAllow'"
 
   // ---------------------------------------------------------------------------
   // New subtypes for public API

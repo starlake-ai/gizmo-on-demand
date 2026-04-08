@@ -53,6 +53,13 @@ object AclEvaluator:
             matchedGrant = None,
             denyReason = Some(DenyReason.ExpiredGrant(table, user, expiredAt))
           )
+        case GrantMatchResult.NoMatch if policy.mode == ResolutionMode.DefaultAllow && !index.hasAnyGrant(table) =>
+          TableAccess(
+            table = table,
+            decision = Decision.Allowed,
+            matchedGrant = None,
+            denyReason = None
+          )
         case GrantMatchResult.NoMatch =>
           TableAccess(
             table = table,
@@ -213,6 +220,55 @@ object AclEvaluator:
     * Respects authorized grant boundaries: if a view has an authorized grant for the user,
     * base tables are NOT checked (opaque boundary).
     */
+  /** In DefaultAllow mode, enforce grants if one exists for this table; otherwise allow. */
+  private def defaultAllowCheck(
+      table: TableRef,
+      index: GrantIndex,
+      user: UserIdentity,
+      isView: Boolean,
+      warnings: List[String] = Nil
+  ): List[TableAccess] =
+    if index.hasAnyGrant(table) then
+      index.checkAccess(table, user) match
+        case GrantMatchResult.Matched(authorized) =>
+          List(TableAccess(
+            table = table,
+            decision = Decision.Allowed,
+            matchedGrant = None,
+            denyReason = None,
+            grantType = Some(if authorized then GrantType.Authorized else GrantType.Regular),
+            isView = isView,
+            warnings = warnings
+          ))
+        case GrantMatchResult.Expired(expiredAt) =>
+          List(TableAccess(
+            table = table,
+            decision = Decision.Denied,
+            matchedGrant = None,
+            denyReason = Some(DenyReason.ExpiredGrant(table, user, expiredAt)),
+            grantType = None,
+            isView = isView
+          ))
+        case GrantMatchResult.NoMatch =>
+          List(TableAccess(
+            table = table,
+            decision = Decision.Denied,
+            matchedGrant = None,
+            denyReason = Some(DenyReason.NoMatchingGrant(table, user)),
+            grantType = None,
+            isView = isView
+          ))
+    else
+      List(TableAccess(
+        table = table,
+        decision = Decision.Allowed,
+        matchedGrant = None,
+        denyReason = None,
+        grantType = Some(GrantType.UnknownButAllowed),
+        isView = isView,
+        warnings = warnings :+ s"Table '${table.canonical}' has no grants — allowed in defaultAllow mode"
+      ))
+
   private def walkResolution(
       table: TableRef,
       resolution: SingleTableResolution,
@@ -247,6 +303,16 @@ object AclEvaluator:
               grantType = None,
               isView = false
             ))
+          case GrantMatchResult.NoMatch if mode == ResolutionMode.DefaultAllow && !index.hasAnyGrant(table) =>
+            List(TableAccess(
+              table = table,
+              decision = Decision.Allowed,
+              matchedGrant = None,
+              denyReason = None,
+              grantType = Some(GrantType.UnknownButAllowed),
+              isView = false,
+              warnings = List(s"Table '${table.canonical}' has no grants — allowed in defaultAllow mode")
+            ))
           case GrantMatchResult.NoMatch =>
             List(TableAccess(
               table = table,
@@ -268,6 +334,8 @@ object AclEvaluator:
               grantType = None,
               isView = false
             ))
+          case ResolutionMode.DefaultAllow =>
+            defaultAllowCheck(table, index, user, isView = false)
           case ResolutionMode.Permissive =>
             List(TableAccess(
               table = table,
@@ -290,6 +358,9 @@ object AclEvaluator:
               grantType = None,
               isView = false
             ))
+          case ResolutionMode.DefaultAllow =>
+            defaultAllowCheck(table, index, user, isView = false,
+              warnings = List(s"Callback error for '${table.canonical}': $msg"))
           case ResolutionMode.Permissive =>
             List(TableAccess(
               table = table,
@@ -337,6 +408,22 @@ object AclEvaluator:
       case SingleTableResolution.ResolvedView(deps, resolved) =>
         // First check if user has a grant on the view itself
         index.checkAccess(table, user) match
+          case GrantMatchResult.NoMatch if mode == ResolutionMode.DefaultAllow && !index.hasAnyGrant(table) =>
+            // DefaultAllow: view has no grants at all — allow and check base tables
+            val viewAccess = TableAccess(
+              table = table,
+              decision = Decision.Allowed,
+              matchedGrant = None,
+              denyReason = None,
+              grantType = Some(GrantType.UnknownButAllowed),
+              isView = true,
+              warnings = List(s"View '${table.canonical}' has no grants — allowed in defaultAllow mode")
+            )
+            val depAccesses = resolved.toList.flatMap { case (depRef, depResolution) =>
+              walkResolution(depRef, depResolution, index, user, mode)
+            }
+            viewAccess :: depAccesses
+
           case GrantMatchResult.NoMatch =>
             // No grant on view: denied. Don't check base tables.
             List(TableAccess(

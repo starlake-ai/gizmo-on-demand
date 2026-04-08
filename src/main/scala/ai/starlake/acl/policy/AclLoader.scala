@@ -101,9 +101,10 @@ object AclLoader:
 
   private def validateMode(raw: String): ValidatedNel[AclError, ResolutionMode] =
     raw.toLowerCase match
-      case "strict"     => ResolutionMode.Strict.validNel
-      case "permissive" => ResolutionMode.Permissive.validNel
-      case other        => AclError.InvalidMode(other).invalidNel
+      case "strict"       => ResolutionMode.Strict.validNel
+      case "permissive"   => ResolutionMode.Permissive.validNel
+      case "defaultallow" => ResolutionMode.DefaultAllow.validNel
+      case other          => AclError.InvalidMode(other).invalidNel
 
   private def validateDocument(doc: RawAclDocument): ValidatedNel[AclError, AclPolicy] =
     if doc.grants.isEmpty then AclError.EmptyPolicy().invalidNel

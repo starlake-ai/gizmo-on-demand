@@ -72,6 +72,17 @@ final class GrantIndex private (
                   case Some(exp) => GrantMatchResult.Expired(exp)
                   case None      => GrantMatchResult.NoMatch
 
+  /** Check whether ANY grant covers the given table, regardless of principal.
+    *
+    * Returns true if any active (non-expired) grant targets this table at
+    * the table, schema, or database level. Used by DefaultAllow mode to
+    * distinguish "not mentioned at all" from "mentioned but user not authorized".
+    */
+  def hasAnyGrant(table: TableRef): Boolean =
+    byTable.contains(table.canonical) ||
+      bySchema.contains(s"${table.database}.${table.schema}") ||
+      byDatabase.contains(table.database)
+
   /** Check whether the given user is authorized to access the given table.
     *
     * Backward-compatible convenience method that delegates to checkAccess.
