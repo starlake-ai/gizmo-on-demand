@@ -104,11 +104,30 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
   ): Pod =
     // Build environment variables
     val containerEnvVars = new java.util.ArrayList[EnvVar]()
+
+    // Propagate ACL, Auth, and Validation env vars from parent process
+    // to ensure spawned pods inherit security configuration.
+    // Added BEFORE caller env vars so caller can override if needed.
+    val globalPrefixes = Seq("ACL_", "AUTH_", "VALIDATION_")
+    sys.env
+      .filter { case (k, _) => globalPrefixes.exists(k.startsWith) }
+      .foreach { case (k, v) =>
+        val ev = new EnvVar()
+        ev.setName(k)
+        ev.setValue(v)
+        containerEnvVars.add(ev)
+      }
+
+    // Caller-supplied env vars — security-prefixed vars are protected
+    // and cannot be overridden by request arguments (prevents policy bypass)
     envVars.foreach { case (k, v) =>
-      val ev = new EnvVar()
-      ev.setName(k)
-      ev.setValue(v)
-      containerEnvVars.add(ev)
+      if globalPrefixes.exists(k.startsWith) then
+        logger.warn(s"Ignoring caller override for protected env var: $k")
+      else
+        val ev = new EnvVar()
+        ev.setName(k)
+        ev.setValue(v)
+        containerEnvVars.add(ev)
     }
     Seq(
       ("PROXY_PORT", podProxyPort.toString),
