@@ -172,23 +172,31 @@ class ProcessManager(backend: ProcessBackend) extends LazyLogging:
       case Some(managedProcess) =>
         logger.info(s"Stopping process '$processName'")
         // For local backend, also kill by port for reliability
-        backend match
+        val stopResult: Either[String, Unit] = backend match
           case local: LocalProcessBackend =>
             local.killProcessOnPort(managedProcess.port)
             local.killProcessOnPort(managedProcess.backendPort)
+            Right(())
           case _ =>
             backend.stop(managedProcess.handle)
-        processes.remove(processName)
-        backend match
-          case local: LocalProcessBackend =>
-            local.releasePorts(managedProcess.port, managedProcess.backendPort)
-          case _ => ()
-        Right(
-          StopProcessResponse(
-            processName = processName,
-            message = s"Process stopped successfully"
-          )
-        )
+
+        stopResult match
+          case Left(error) =>
+            // Don't remove from registry if backend deletion failed — user can retry.
+            logger.error(s"Backend stop failed for '$processName': $error")
+            Left(s"Failed to stop process '$processName': $error")
+          case Right(_) =>
+            processes.remove(processName)
+            backend match
+              case local: LocalProcessBackend =>
+                local.releasePorts(managedProcess.port, managedProcess.backendPort)
+              case _ => ()
+            Right(
+              StopProcessResponse(
+                processName = processName,
+                message = s"Process stopped successfully"
+              )
+            )
 
   /** List all running processes */
   def listProcesses: ListProcessesResponse =
