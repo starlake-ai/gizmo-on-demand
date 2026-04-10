@@ -21,12 +21,17 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
   private val managedByLabel = "managed-by"
   private val managedByValue = "gizmo-process-manager"
 
+  // RFC 1123 metadata.name limit is 63 chars. The "gizmo-proxy-" prefix is 12 chars,
+  // so sanitized instance names must fit in 63 - 12 = 51 chars.
+  private val ResourceNamePrefix = "gizmo-proxy-"
+  private val MaxSanitizedNameLength = 63 - ResourceNamePrefix.length
+
   /** Sanitize name to be RFC 1123 compliant (K8s metadata.name) */
   private def sanitizeName(name: String): String =
-    name.toLowerCase.replaceAll("[^a-z0-9-]", "-").replaceAll("-+", "-").stripPrefix("-").stripSuffix("-").take(63)
+    name.toLowerCase.replaceAll("[^a-z0-9-]", "-").replaceAll("-+", "-").stripPrefix("-").stripSuffix("-").take(MaxSanitizedNameLength)
 
-  private def podName(name: String): String = s"gizmo-proxy-${sanitizeName(name)}"
-  private def serviceName(name: String): String = s"gizmo-proxy-${sanitizeName(name)}"
+  private def podName(name: String): String = s"$ResourceNamePrefix${sanitizeName(name)}"
+  private def serviceName(name: String): String = s"$ResourceNamePrefix${sanitizeName(name)}"
 
   private def buildLabels(name: String): java.util.Map[String, String] =
     val labels = new java.util.HashMap[String, String]()
@@ -53,7 +58,12 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     do
       try
         val entry = s"${config.namespace}/$sName:${config.proxyPort}"
-        val op: java.util.function.UnaryOperator[ConfigMap] = c => { c.getData.put(externalPort.toString, entry); c }
+        val op: java.util.function.UnaryOperator[ConfigMap] = c => {
+          // K8s allows ConfigMaps with no data section — initialize if null
+          if c.getData == null then c.setData(new java.util.HashMap[String, String]())
+          c.getData.put(externalPort.toString, entry)
+          c
+        }
         client.configMaps().inNamespace(cmNs).withName(cmName).edit(op)
         logger.info(s"Patched nginx ConfigMap $cmNs/$cmName: $externalPort -> $entry")
       catch case e: Exception =>
@@ -65,7 +75,10 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
       cmNs = config.nginxConfigMapNamespace.getOrElse(config.namespace)
     do
       try
-        val op: java.util.function.UnaryOperator[ConfigMap] = c => { c.getData.remove(externalPort.toString); c }
+        val op: java.util.function.UnaryOperator[ConfigMap] = c => {
+          if c.getData != null then c.getData.remove(externalPort.toString)
+          c
+        }
         client.configMaps().inNamespace(cmNs).withName(cmName).edit(op)
         logger.info(s"Removed nginx ConfigMap entry for port $externalPort")
       catch case e: Exception =>
@@ -87,7 +100,10 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
             val svc = client.services().inNamespace(ns).withName(svcName).get()
             if svc == null then
               logger.info(s"Removing orphan nginx ConfigMap entry: port $port -> $target (service $svcName not found)")
-              val op: java.util.function.UnaryOperator[ConfigMap] = c => { c.getData.remove(port); c }
+              val op: java.util.function.UnaryOperator[ConfigMap] = c => {
+                if c.getData != null then c.getData.remove(port)
+                c
+              }
               client.configMaps().inNamespace(cmNs).withName(cmName).edit(op)
               port.toIntOption.foreach(releaseExternalPort)
           }
