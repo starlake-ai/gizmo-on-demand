@@ -66,11 +66,14 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     backendContainerPort.setName("backend")
     backendContainerPort.setProtocol("TCP")
 
-    // Container
+    // Container — run ProxyServer directly, not the Process Manager
     val container = new Container()
     container.setName("gizmo-proxy")
     container.setImage(config.imageName)
     container.setImagePullPolicy(config.imagePullPolicy)
+    container.setCommand(java.util.List.of(
+      "/opt/gizmosql/scripts/docker-start-proxy.sh"
+    ))
     container.setEnv(containerEnvVars)
     container.setPorts(java.util.List.of(proxyContainerPort, backendContainerPort))
 
