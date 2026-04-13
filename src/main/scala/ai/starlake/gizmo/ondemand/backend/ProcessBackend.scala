@@ -1,7 +1,7 @@
 package ai.starlake.gizmo.ondemand.backend
 
 /** Result returned by a backend after spawning a process */
-case class SpawnResult(handle: ProcessHandle, host: String, port: Int)
+case class SpawnResult(handle: ProcessHandle, host: String, port: Int, externalHost: Option[String] = None)
 
 /** A process discovered during startup recovery */
 case class DiscoveredProcess(
@@ -10,7 +10,8 @@ case class DiscoveredProcess(
     host: String,
     port: Int,
     backendPort: Int,
-    arguments: Map[String, String]
+    arguments: Map[String, String],
+    externalHost: Option[String] = None
 )
 
 /** Abstract handle to a spawned process — local or remote */

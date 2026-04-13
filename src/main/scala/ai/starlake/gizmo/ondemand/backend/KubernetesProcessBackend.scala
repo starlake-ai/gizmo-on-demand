@@ -173,7 +173,7 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
       setupWatch(pName, ns, name, onExit)
 
       val host = s"$sName.$ns.svc.cluster.local"
-      Right(SpawnResult(K8sProcessHandle(pName, sName, ns), host, podProxyPort))
+      Right(SpawnResult(K8sProcessHandle(pName, sName, ns), host, podProxyPort, config.externalHost))
     catch
       case e: Exception =>
         logger.error(s"Failed to create K8s resources for '$name'", e)
@@ -261,7 +261,7 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
             val handle = K8sProcessHandle(pName, sName, ns)
 
             logger.info(s"Discovered existing pod $pName (instance=$instanceName, port=$proxyPort)")
-            Some(DiscoveredProcess(instanceName, handle, host, proxyPort, backendPort, arguments))
+            Some(DiscoveredProcess(instanceName, handle, host, proxyPort, backendPort, arguments, config.externalHost))
       }
     catch
       case e: Exception =>

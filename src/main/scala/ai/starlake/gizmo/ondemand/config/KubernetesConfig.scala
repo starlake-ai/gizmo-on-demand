@@ -13,7 +13,8 @@ case class KubernetesConfig(
     imagePullPolicy: String,
     imagePullSecrets: List[String],
     labels: Map[String, String],
-    startupTimeoutSeconds: Int
+    startupTimeoutSeconds: Int,
+    externalHost: Option[String]
 )
 
 object KubernetesConfig:
