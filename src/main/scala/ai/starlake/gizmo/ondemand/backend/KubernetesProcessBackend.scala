@@ -47,7 +47,10 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
       ("PROXY_PORT", podProxyPort.toString),
       ("PROXY_HOST", "0.0.0.0"),
       ("GIZMO_SERVER_HOST", "127.0.0.1"),
-      ("GIZMO_SERVER_PORT", podBackendPort.toString)
+      ("GIZMO_SERVER_PORT", podBackendPort.toString),
+      // Disable the backend's plaintext health server to avoid port conflict with the proxy.
+      // K8s probes use tcpSocket on the proxy port instead.
+      ("HEALTH_PORT", "0")
     ).foreach { case (k, v) =>
       val ev = new EnvVar()
       ev.setName(k)
