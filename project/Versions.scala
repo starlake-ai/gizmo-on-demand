@@ -12,7 +12,7 @@ object Versions {
   val scalaTest = "3.2.17"
   val jsqlParser = "5.3.218"
   val jsqlTranspiler = "1.8"
-  val starlakeJdbc = "0.4"
+  val starlakeJdbc = "0.7"
   val circeYaml = "0.16.1"
   val cats = "2.13.0"
   val duckdb = "1.5.1.0"
