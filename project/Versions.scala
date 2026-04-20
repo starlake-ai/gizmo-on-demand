@@ -15,7 +15,7 @@ object Versions {
   val starlakeJdbc = "0.7"
   val circeYaml = "0.16.1"
   val cats = "2.13.0"
-  val duckdb = "1.5.1.0"
+  val duckdb = "1.5.2.0"
   val blobstore = "0.10.1"
   val netty = "4.1.97.Final"
   val fabric8 = "7.1.0"
