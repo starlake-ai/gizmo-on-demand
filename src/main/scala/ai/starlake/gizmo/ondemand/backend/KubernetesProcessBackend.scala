@@ -14,11 +14,34 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
 
   private val client: KubernetesClient = new KubernetesClientBuilder().build()
   private val watches = TrieMap.empty[String, Watch]
+  private val allocatedPorts = java.util.Collections.newSetFromMap(
+    new java.util.concurrent.ConcurrentHashMap[Int, java.lang.Boolean]()
+  ).asScala
+  private val instanceExternalPorts = TrieMap.empty[String, Int]
   private val managedByLabel = "managed-by"
   private val managedByValue = "gizmo-process-manager"
 
-  private def podName(name: String): String = s"gizmo-proxy-$name"
-  private def serviceName(name: String): String = s"gizmo-proxy-$name"
+  // RFC 1123 metadata.name limit is 63 chars. The "gizmo-proxy-" prefix is 12 chars,
+  // so sanitized instance names must fit in 63 - 12 = 51 chars.
+  private val ResourceNamePrefix = "gizmo-proxy-"
+  private val MaxSanitizedNameLength = 63 - ResourceNamePrefix.length
+
+  /** Sanitize name to be RFC 1123 compliant (K8s metadata.name).
+    * Falls back to a deterministic hash-based name if the input sanitizes to empty
+    * (e.g. input was all special chars like "___" or "---"), guaranteeing a valid
+    * suffix for "gizmo-proxy-". */
+  private def sanitizeName(name: String): String =
+    val sanitized = name.toLowerCase
+      .replaceAll("[^a-z0-9-]", "-")
+      .replaceAll("-+", "-")
+      .stripPrefix("-")
+      .stripSuffix("-")
+      .take(MaxSanitizedNameLength)
+    if sanitized.nonEmpty then sanitized
+    else s"inst-${Integer.toHexString(name.hashCode).take(MaxSanitizedNameLength - 5)}"
+
+  private def podName(name: String): String = s"$ResourceNamePrefix${sanitizeName(name)}"
+  private def serviceName(name: String): String = s"$ResourceNamePrefix${sanitizeName(name)}"
 
   private def buildLabels(name: String): java.util.Map[String, String] =
     val labels = new java.util.HashMap[String, String]()
@@ -26,6 +49,99 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     labels.put("gizmo-instance", name)
     config.labels.foreach { case (k, v) => labels.put(k, v) }
     labels
+
+  private def allocateExternalPort(): Option[Int] =
+    config.nginxConfigMapName.flatMap { _ =>
+      allocatedPorts.synchronized {
+        (config.externalPortRangeStart to config.externalPortRangeEnd)
+          .find(p => !allocatedPorts.contains(p))
+          .map { port => allocatedPorts.add(port); port }
+      }
+    }
+
+  private def releaseExternalPort(port: Int): Unit = allocatedPorts.remove(port)
+
+  /** Patch the nginx ConfigMap with a new external-port mapping.
+    *
+    * Throws NginxConfigMapPatchException on failure so the caller can refuse
+    * to advertise an unusable externalPort to clients.
+    */
+  private def patchNginxConfigMap(externalPort: Int, sName: String): Unit =
+    config.nginxConfigMapName.foreach { cmName =>
+      val cmNs = config.nginxConfigMapNamespace.getOrElse(config.namespace)
+      try
+        val entry = s"${config.namespace}/$sName:${config.proxyPort}"
+        val op: java.util.function.UnaryOperator[ConfigMap] = c => {
+          // K8s allows ConfigMaps with no data section — initialize if null
+          if c.getData == null then c.setData(new java.util.HashMap[String, String]())
+          c.getData.put(externalPort.toString, entry)
+          c
+        }
+        client.configMaps().inNamespace(cmNs).withName(cmName).edit(op)
+        logger.info(s"Patched nginx ConfigMap $cmNs/$cmName: $externalPort -> $entry")
+      catch case e: Exception =>
+        logger.error(s"Failed to patch nginx ConfigMap for port $externalPort", e)
+        throw NginxConfigMapPatchException(s"Failed to patch nginx ConfigMap $cmNs/$cmName for externalPort $externalPort", e)
+    }
+
+  private def removeNginxConfigMapEntry(externalPort: Int): Unit =
+    for
+      cmName <- config.nginxConfigMapName
+      cmNs = config.nginxConfigMapNamespace.getOrElse(config.namespace)
+    do
+      try
+        val op: java.util.function.UnaryOperator[ConfigMap] = c => {
+          if c.getData != null then c.getData.remove(externalPort.toString)
+          c
+        }
+        client.configMaps().inNamespace(cmNs).withName(cmName).edit(op)
+        logger.info(s"Removed nginx ConfigMap entry for port $externalPort")
+      catch case e: Exception =>
+        logger.error(s"Failed to remove nginx ConfigMap entry for port $externalPort", e)
+
+  /** Remove nginx ConfigMap entries that point to gizmo services which no longer exist.
+    *
+    * Scoped to entries WE own, to avoid deleting unrelated TCP services that share
+    * the same nginx ConfigMap. An entry is considered "ours" only if ALL of:
+    *   - port is an integer inside [externalPortRangeStart, externalPortRangeEnd]
+    *   - target namespace matches our configured gizmo namespace
+    *   - target serviceName starts with our "gizmo-proxy-" prefix
+    */
+  private def cleanupOrphanConfigMapEntries(ns: String): Unit =
+    for
+      cmName <- config.nginxConfigMapName
+      cmNs = config.nginxConfigMapNamespace.getOrElse(ns)
+    do
+      try
+        val cm = client.configMaps().inNamespace(cmNs).withName(cmName).get()
+        if cm != null && cm.getData != null then
+          val entries = cm.getData.asScala.toMap
+          entries.foreach { case (portStr, target) =>
+            // target format: "namespace/serviceName:port"
+            val parts = target.split("/", 2)
+            val targetNs = parts.headOption.getOrElse("")
+            val svcName = parts.lift(1).flatMap(_.split(":").headOption).getOrElse("")
+            val portInt = portStr.toIntOption
+
+            // Ownership guard: only consider entries that match ALL gizmo markers
+            val isOurs =
+              targetNs == config.namespace &&
+                svcName.startsWith(ResourceNamePrefix) &&
+                portInt.exists(p => p >= config.externalPortRangeStart && p <= config.externalPortRangeEnd)
+
+            if isOurs then
+              val svc = client.services().inNamespace(ns).withName(svcName).get()
+              if svc == null then
+                logger.info(s"Removing orphan nginx ConfigMap entry: port $portStr -> $target (gizmo service $svcName not found)")
+                val op: java.util.function.UnaryOperator[ConfigMap] = c => {
+                  if c.getData != null then c.getData.remove(portStr)
+                  c
+                }
+                client.configMaps().inNamespace(cmNs).withName(cmName).edit(op)
+                portInt.foreach(releaseExternalPort)
+          }
+      catch case e: Exception =>
+        logger.warn(s"Failed to cleanup orphan ConfigMap entries: ${e.getMessage}")
 
   private def buildPod(
       pName: String,
@@ -37,17 +153,39 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
   ): Pod =
     // Build environment variables
     val containerEnvVars = new java.util.ArrayList[EnvVar]()
+
+    // Propagate ACL, Auth, and Validation env vars from parent process
+    // to ensure spawned pods inherit security configuration.
+    // Added BEFORE caller env vars so caller can override if needed.
+    val globalPrefixes = Seq("ACL_", "AUTH_", "VALIDATION_")
+    sys.env
+      .filter { case (k, _) => globalPrefixes.exists(k.startsWith) }
+      .foreach { case (k, v) =>
+        val ev = new EnvVar()
+        ev.setName(k)
+        ev.setValue(v)
+        containerEnvVars.add(ev)
+      }
+
+    // Caller-supplied env vars — security-prefixed vars are protected
+    // and cannot be overridden by request arguments (prevents policy bypass)
     envVars.foreach { case (k, v) =>
-      val ev = new EnvVar()
-      ev.setName(k)
-      ev.setValue(v)
-      containerEnvVars.add(ev)
+      if globalPrefixes.exists(k.startsWith) then
+        logger.warn(s"Ignoring caller override for protected env var: $k")
+      else
+        val ev = new EnvVar()
+        ev.setName(k)
+        ev.setValue(v)
+        containerEnvVars.add(ev)
     }
     Seq(
       ("PROXY_PORT", podProxyPort.toString),
       ("PROXY_HOST", "0.0.0.0"),
       ("GIZMO_SERVER_HOST", "127.0.0.1"),
-      ("GIZMO_SERVER_PORT", podBackendPort.toString)
+      ("GIZMO_SERVER_PORT", podBackendPort.toString),
+      // Disable the backend's plaintext health server to avoid port conflict with the proxy.
+      // K8s probes use tcpSocket on the proxy port instead.
+      ("HEALTH_PORT", "0")
     ).foreach { case (k, v) =>
       val ev = new EnvVar()
       ev.setName(k)
@@ -66,18 +204,79 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     backendContainerPort.setName("backend")
     backendContainerPort.setProtocol("TCP")
 
-    // Container
+    // Resource limits
+    val resourceRequirements = new ResourceRequirements()
+    resourceRequirements.setRequests(Map(
+      "cpu"    -> new Quantity(config.resourceRequestsCpu),
+      "memory" -> new Quantity(config.resourceRequestsMemory)
+    ).asJava)
+    resourceRequirements.setLimits(Map(
+      "cpu"    -> new Quantity(config.resourceLimitsCpu),
+      "memory" -> new Quantity(config.resourceLimitsMemory)
+    ).asJava)
+
+    // TCP socket probe target — the proxy is a gRPC server (Arrow Flight SQL, TLS),
+    // not HTTP, so we use tcpSocket on the proxy port to verify it's listening.
+    // The backend GizmoSQL health server is disabled (HEALTH_PORT=0) to avoid port conflict.
+    val tcpProbeAction = new TCPSocketAction()
+    tcpProbeAction.setPort(new IntOrString(podProxyPort))
+
+    // Startup probe — generous: allows slow DuckDB/DuckLake ATTACH on cold start
+    val startupProbe = new Probe()
+    startupProbe.setTcpSocket(tcpProbeAction)
+    startupProbe.setInitialDelaySeconds(5)
+    startupProbe.setPeriodSeconds(2)
+    startupProbe.setFailureThreshold(30) // 5 + 30*2 = 65s max startup
+
+    // Readiness probe
+    val readinessProbe = new Probe()
+    readinessProbe.setTcpSocket(tcpProbeAction)
+    readinessProbe.setPeriodSeconds(5)
+    readinessProbe.setFailureThreshold(3)
+
+    // Liveness probe
+    val livenessProbe = new Probe()
+    livenessProbe.setTcpSocket(tcpProbeAction)
+    livenessProbe.setPeriodSeconds(10)
+    livenessProbe.setFailureThreshold(6)
+
+    // Container — run ProxyServer directly, not the Process Manager
     val container = new Container()
     container.setName("gizmo-proxy")
     container.setImage(config.imageName)
     container.setImagePullPolicy(config.imagePullPolicy)
+    container.setCommand(java.util.List.of(
+      "/opt/gizmosql/scripts/docker-start-proxy.sh"
+    ))
     container.setEnv(containerEnvVars)
     container.setPorts(java.util.List.of(proxyContainerPort, backendContainerPort))
+    container.setStartupProbe(startupProbe)
+    container.setReadinessProbe(readinessProbe)
+    container.setLivenessProbe(livenessProbe)
+    container.setResources(resourceRequirements)
+
+    // Mount shared PVC for DuckLake data files
+    config.volumeClaimName.foreach { pvcName =>
+      val volumeMount = new VolumeMount()
+      volumeMount.setName("projects")
+      volumeMount.setMountPath(config.volumeMountPath)
+      container.setVolumeMounts(java.util.List.of(volumeMount))
+    }
 
     // Pod spec
     val podSpec = new PodSpec()
     podSpec.setContainers(java.util.List.of(container))
     podSpec.setRestartPolicy("Never")
+
+    // Add PVC volume if configured
+    config.volumeClaimName.foreach { pvcName =>
+      val volume = new Volume()
+      volume.setName("projects")
+      val pvcSource = new PersistentVolumeClaimVolumeSource()
+      pvcSource.setClaimName(pvcName)
+      volume.setPersistentVolumeClaim(pvcSource)
+      podSpec.setVolumes(java.util.List.of(volume))
+    }
     config.serviceAccountName.foreach(sa => podSpec.setServiceAccountName(sa))
     if config.imagePullSecrets.nonEmpty then
       val secrets = config.imagePullSecrets.map { s =>
@@ -152,6 +351,26 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
       client.services().inNamespace(ns).resource(service).create()
       logger.info(s"Created service $sName in namespace $ns")
 
+      // Allocate external port and patch nginx ConfigMap.
+      // If the patch fails, we MUST roll back pod/service/port so we don't
+      // advertise an unusable externalPort to clients (MAJOR — codex review).
+      val externalPort = allocateExternalPort()
+      val patchError: Option[String] = externalPort.flatMap { ep =>
+        try
+          patchNginxConfigMap(ep, sName)
+          instanceExternalPorts.put(name, ep)
+          None
+        catch
+          case e: NginxConfigMapPatchException =>
+            logger.error(s"Rolling back pod/service/port due to nginx ConfigMap patch failure", e)
+            releaseExternalPort(ep)
+            try client.pods().inNamespace(ns).withName(pName).delete() catch case _: Exception => ()
+            try client.services().inNamespace(ns).withName(sName).delete() catch case _: Exception => ()
+            Some(s"Failed to expose external port for '$name': ${e.getMessage}")
+      }
+      if patchError.isDefined then
+        return Left(patchError.get)
+
       // Wait for pod to be ready
       try
         client
@@ -163,6 +382,12 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
       catch
         case e: Exception =>
           logger.error(s"Pod $pName did not become ready within ${config.startupTimeoutSeconds}s", e)
+          // Clean up nginx ConfigMap entry on failure
+          externalPort.foreach { ep =>
+            removeNginxConfigMapEntry(ep)
+            instanceExternalPorts.remove(name)
+            releaseExternalPort(ep)
+          }
           client.pods().inNamespace(ns).withName(pName).delete()
           client.services().inNamespace(ns).withName(sName).delete()
           return Left(
@@ -173,13 +398,34 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
       setupWatch(pName, ns, name, onExit)
 
       val host = s"$sName.$ns.svc.cluster.local"
-      Right(SpawnResult(K8sProcessHandle(pName, sName, ns), host, podProxyPort))
+      Right(SpawnResult(K8sProcessHandle(pName, sName, ns, name), host, podProxyPort, config.externalHost, externalPort))
     catch
       case e: Exception =>
         logger.error(s"Failed to create K8s resources for '$name'", e)
         Left(s"Failed to start K8s pod: ${e.getMessage}")
 
+  /** Clean up external port resources (nginx mapping + allocated port) for an instance.
+    * Called both on explicit stop and on unexpected pod exit to prevent leaks. */
+  private def cleanupExternalPortResources(instanceName: String): Unit =
+    instanceExternalPorts.remove(instanceName).foreach { ep =>
+      try removeNginxConfigMapEntry(ep)
+      catch case e: Exception =>
+        logger.warn(s"Failed to remove nginx ConfigMap entry for $instanceName port $ep: ${e.getMessage}")
+      releaseExternalPort(ep)
+      logger.info(s"Released external port $ep for instance $instanceName")
+    }
+
   private def setupWatch(pName: String, ns: String, instanceName: String, onExit: () => Unit): Unit =
+    // Wrap the caller's onExit so external-port resources are cleaned up on
+    // unexpected pod termination (MAJOR — codex review: watch-based exit
+    // was leaking nginx mappings and allocated ports).
+    val onExitWithCleanup: () => Unit = () => {
+      try cleanupExternalPortResources(instanceName)
+      catch case e: Exception =>
+        logger.warn(s"cleanupExternalPortResources failed for $instanceName: ${e.getMessage}")
+      onExit()
+    }
+
     val watch = client
       .pods()
       .inNamespace(ns)
@@ -189,13 +435,13 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
           action match
             case Action.DELETED =>
               logger.warn(s"Pod $pName was deleted unexpectedly")
-              onExit()
+              onExitWithCleanup()
             case Action.MODIFIED =>
               val phase =
                 Option(resource.getStatus).flatMap(s => Option(s.getPhase)).getOrElse("")
               if phase == "Failed" || phase == "Succeeded" then
                 logger.warn(s"Pod $pName entered terminal phase: $phase")
-                onExit()
+                onExitWithCleanup()
             case _ => // ignore
 
         override def onClose(cause: io.fabric8.kubernetes.client.WatcherException): Unit =
@@ -216,12 +462,27 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
         .asScala
         .toList
 
-      pods.flatMap { pod =>
+      val discovered = pods.flatMap { pod =>
         val podMeta = pod.getMetadata
         val pName = podMeta.getName
         val phase = Option(pod.getStatus).flatMap(s => Option(s.getPhase)).getOrElse("")
 
-        if phase != "Running" then
+        if Set("Failed", "Succeeded", "Unknown").contains(phase) then
+          logger.info(s"Cleaning up stale pod $pName in phase '$phase'")
+          try
+            val labels = Option(podMeta.getLabels).map(_.asScala.toMap).getOrElse(Map.empty)
+            val instanceName = labels.getOrElse("gizmo-instance", pName.stripPrefix("gizmo-proxy-"))
+            client.pods().inNamespace(ns).withName(pName).delete()
+            val sName = serviceName(instanceName)
+            client.services().inNamespace(ns).withName(sName).delete()
+            instanceExternalPorts.remove(instanceName).foreach { ep =>
+              removeNginxConfigMapEntry(ep)
+              releaseExternalPort(ep)
+            }
+          catch case e: Exception =>
+            logger.warn(s"Failed to clean up stale pod $pName: ${e.getMessage}")
+          None
+        else if phase != "Running" then
           logger.info(s"Skipping pod $pName in phase '$phase' during discovery")
           None
         else
@@ -258,11 +519,29 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
             setupWatch(pName, ns, instanceName, onExitFactory(instanceName))
 
             val host = s"$sName.$ns.svc.cluster.local"
-            val handle = K8sProcessHandle(pName, sName, ns)
+            val handle = K8sProcessHandle(pName, sName, ns, instanceName)
 
-            logger.info(s"Discovered existing pod $pName (instance=$instanceName, port=$proxyPort)")
-            Some(DiscoveredProcess(instanceName, handle, host, proxyPort, backendPort, arguments))
+            // Recover external port from nginx ConfigMap
+            val externalPort: Option[Int] = for
+              cmName <- config.nginxConfigMapName
+              cmNs = config.nginxConfigMapNamespace.getOrElse(config.namespace)
+              cm <- Option(client.configMaps().inNamespace(cmNs).withName(cmName).get())
+              data <- Option(cm.getData).map(_.asScala.toMap)
+              entry <- data.find((_, v) => v.contains(s"/$sName:"))
+              port <- entry._1.toIntOption
+            yield
+              allocatedPorts.add(port)
+              instanceExternalPorts.put(instanceName, port)
+              port
+
+            logger.info(s"Discovered existing pod $pName (instance=$instanceName, port=$proxyPort, externalPort=${externalPort.getOrElse("none")})")
+            Some(DiscoveredProcess(instanceName, handle, host, proxyPort, backendPort, arguments, config.externalHost, externalPort))
       }
+
+      // Clean up orphan nginx ConfigMap entries pointing to non-existent services
+      cleanupOrphanConfigMapEntries(ns)
+
+      discovered
     catch
       case e: Exception =>
         logger.error("Failed to discover existing K8s pods", e)
@@ -270,9 +549,9 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
 
   override def stop(handle: ProcessHandle): Either[String, Unit] =
     handle match
-      case K8sProcessHandle(pName, sName, ns) =>
+      case K8sProcessHandle(pName, sName, ns, instanceName) =>
         try
-          val instanceName = pName.stripPrefix("gizmo-proxy-")
+          cleanupExternalPortResources(instanceName)
           watches.remove(instanceName).foreach(_.close())
           client.pods().inNamespace(ns).withName(pName).delete()
           client.services().inNamespace(ns).withName(sName).delete()
@@ -287,7 +566,7 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
 
   override def isAlive(handle: ProcessHandle): Boolean =
     handle match
-      case K8sProcessHandle(pName, _, ns) =>
+      case K8sProcessHandle(pName, _, ns, _) =>
         try
           val pod = client.pods().inNamespace(ns).withName(pName).get()
           if pod == null then false
@@ -302,6 +581,11 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     val ns = config.namespace
     var count = 0
     try
+      // Clean up all nginx ConfigMap entries
+      instanceExternalPorts.values.foreach(removeNginxConfigMapEntry)
+      instanceExternalPorts.clear()
+      allocatedPorts.clear()
+
       watches.values.foreach(_.close())
       watches.clear()
 
@@ -344,3 +628,10 @@ class KubernetesProcessBackend(config: KubernetesConfig) extends ProcessBackend 
     watches.clear()
     client.close()
     logger.info("Kubernetes client closed")
+
+end KubernetesProcessBackend
+
+/** Thrown when patching the nginx-ingress TCP services ConfigMap fails.
+  * Signals the caller to refuse advertising an unusable externalPort. */
+class NginxConfigMapPatchException(message: String, cause: Throwable)
+    extends RuntimeException(message, cause)

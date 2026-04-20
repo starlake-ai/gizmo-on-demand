@@ -12,7 +12,9 @@ case class ManagedProcess(
     backendPort: Int,
     handle: ProcessHandle,
     host: String,
-    arguments: Map[String, String]
+    arguments: Map[String, String],
+    externalHost: Option[String] = None,
+    externalPort: Option[Int] = None
 )
 
 /** Process manager that handles lifecycle of processes */
@@ -39,7 +41,9 @@ class ProcessManager(backend: ProcessBackend) extends LazyLogging:
         backendPort = dp.backendPort,
         handle = dp.handle,
         host = dp.host,
-        arguments = dp.arguments
+        arguments = dp.arguments,
+        externalHost = dp.externalHost,
+        externalPort = dp.externalPort
       )
       processes.putIfAbsent(dp.name, managedProcess) match
         case Some(_) =>
@@ -131,7 +135,9 @@ class ProcessManager(backend: ProcessBackend) extends LazyLogging:
                   backendPort,
                   spawnResult.handle,
                   spawnResult.host,
-                  arguments
+                  arguments,
+                  externalHost = spawnResult.externalHost,
+                  externalPort = spawnResult.externalPort
                 )
 
                 processes.putIfAbsent(processName, managedProcess) match
@@ -152,7 +158,9 @@ class ProcessManager(backend: ProcessBackend) extends LazyLogging:
                         port = spawnResult.port,
                         message =
                           s"Proxy Process started successfully on port ${spawnResult.port}",
-                        host = Some(spawnResult.host)
+                        host = Some(spawnResult.host),
+                        externalHost = spawnResult.externalHost,
+                        externalPort = spawnResult.externalPort
                       )
                     )
 
@@ -164,23 +172,31 @@ class ProcessManager(backend: ProcessBackend) extends LazyLogging:
       case Some(managedProcess) =>
         logger.info(s"Stopping process '$processName'")
         // For local backend, also kill by port for reliability
-        backend match
+        val stopResult: Either[String, Unit] = backend match
           case local: LocalProcessBackend =>
             local.killProcessOnPort(managedProcess.port)
             local.killProcessOnPort(managedProcess.backendPort)
+            Right(())
           case _ =>
             backend.stop(managedProcess.handle)
-        processes.remove(processName)
-        backend match
-          case local: LocalProcessBackend =>
-            local.releasePorts(managedProcess.port, managedProcess.backendPort)
-          case _ => ()
-        Right(
-          StopProcessResponse(
-            processName = processName,
-            message = s"Process stopped successfully"
-          )
-        )
+
+        stopResult match
+          case Left(error) =>
+            // Don't remove from registry if backend deletion failed — user can retry.
+            logger.error(s"Backend stop failed for '$processName': $error")
+            Left(s"Failed to stop process '$processName': $error")
+          case Right(_) =>
+            processes.remove(processName)
+            backend match
+              case local: LocalProcessBackend =>
+                local.releasePorts(managedProcess.port, managedProcess.backendPort)
+              case _ => ()
+            Right(
+              StopProcessResponse(
+                processName = processName,
+                message = s"Process stopped successfully"
+              )
+            )
 
   /** List all running processes */
   def listProcesses: ListProcessesResponse =
@@ -190,7 +206,9 @@ class ProcessManager(backend: ProcessBackend) extends LazyLogging:
         port = mp.port,
         pid = mp.handle.pid,
         status = if backend.isAlive(mp.handle) then "running" else "stopped",
-        host = Some(mp.host)
+        host = Some(mp.host),
+        externalHost = mp.externalHost,
+        externalPort = mp.externalPort
       )
     }.toList
     ListProcessesResponse(processInfos)
